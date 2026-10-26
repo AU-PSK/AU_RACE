@@ -78,6 +78,12 @@ body > canvas { position: fixed; inset: 0; z-index: 0; display: block; }
 .hud-brand { font-size: 1rem; font-weight: 500; }
 .hud-brand span { color: var(--lime); }
 #race-status { color: var(--lime); }
+#race-status.warning { color: #ff7a59; font-size: 1.15rem; }
+.item-slot {
+  position: absolute; top: 76px; left: 28px; padding: 10px 14px; border-radius: 8px;
+  background: #111a1ddd; border: 1px solid var(--lime); color: var(--lime);
+  font-family: "DM Mono", monospace; font-size: 0.8rem; letter-spacing: 0.08em;
+}
 .hud-lap { padding: 9px 13px; border-radius: 7px; background: #17201dcc; }
 .hud-lap strong { margin-left: 8px; font-size: 1rem; }
 .hud-bottom {
