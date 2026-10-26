@@ -58,6 +58,10 @@ h3 { margin: 26px 0 10px; }
 .join-divider { margin: 16px 0 2px; text-align: center; color: #85918b; font-size: 0.72rem; }
 .error { min-height: 1em; color: #ff9e8c !important; }
 .hidden { display: none !important; }
+.invite-link {
+  display: block; overflow-wrap: anywhere; padding: 12px; border-radius: 7px;
+  background: #101719; color: var(--lime); text-decoration: underline;
+}
 #players, #result-list { margin: 0; padding: 0; list-style: none; }
 #players li, #result-list li {
   display: flex; justify-content: space-between; padding: 9px 0;

@@ -18,22 +18,20 @@ og multiplayer kan prøves uden at starte en spilsserver.
 
 ## Åbn spillet via en offentlig URL
 
-Klienten hostes på GitHub Pages, for eksempel
-`https://SUND-Okonomi.github.io/AU_RACE/`. GitHub Actions bygger og udgiver
-browserklienten uden serverkonfiguration. Under **Settings → Pages** skal
-deployment source være sat til **GitHub Actions**.
+[Åbn AU Race](https://petersoegaard90.github.io/AU_RACE/) på GitHub Pages.
+Hvis linket ikke virker endnu, skal Pages først aktiveres under
+**Settings → Pages** med **GitHub Actions** som deployment source. Workflowet
+bygger og udgiver browserklienten.
 
-Push ændringer til `main` (eller kør workflowet manuelt under **Actions**), og
-åbn Pages-linket, når workflowet er færdigt.
+Når spillet er åbent, opret et løb og del det invitationslink, spillet viser.
+Venner åbner linket, vælger kaldenavn og trykker **Deltag i løb**.
 
 ## Sådan spiller du
 
-Skriv et kaldenavn og vælg **Spil solo på tid** for at køre alene uden server.
-For multiplayer vælg **Opret peer-to-peer-løb**. Værten laver en kode og sender
-den til en spiller; spilleren indsætter koden og sender sin svar-kode tilbage
-til værten. Værten indsætter svaret og laver derefter en ny invitationskode
-til hver ekstra spiller. Tilsluttede spillere vælger racer eller tilskuer før
-de opretter svar-koden. Værten starter løbet og skal blive i spillet.
+Skriv et kaldenavn og vælg **Spil solo på tid** for at køre alene.
+For multiplayer vælg **Opret peer-to-peer-løb**. Del invitationslinket fra
+lobbyen; hver gæst åbner linket, vælger kaldenavn, racer/tilskuer og kartfarve
+og trykker **Deltag i løb**. Værten starter løbet og skal blive online.
 
 Kør med **W / ↑**, brems med **S / ↓**, skift bane med **A / D / ← / →**, og
 brug en samlet bonus med **Mellemrum**.
@@ -42,10 +40,11 @@ brug en samlet bonus med **Mellemrum**.
 
 - Direkte WebRTC-dataforbindelser med værtsstyret løb, op til fire racere og
   otte tilskuere.
-- Forbindelseskoder udveksles manuelt; der kræves ingen spilsserver eller
-  signaleringstjeneste, men værten skal være online under løbet.
-- En offentlig STUN-tjeneste bruges til at finde netværksruter. Der er ingen
-  TURN-relay; nogle netværk kan derfor forhindre direkte forbindelse.
+- PeerJS' offentlige signaleringstjeneste hjælper browserne med at finde
+  hinanden; selve spiltrafikken sendes direkte mellem browserne. Du behøver
+  ikke at drive en spilsserver, men værten skal være online under løbet.
+- WebRTC bruger en offentlig STUN-tjeneste. Der er ingen TURN-relay, så
+  direkte forbindelser kan fejle på nogle netværk.
 - Three.js-scene i browseren og værtsstyrede bevægelsesopdateringer.
 - Fire originale kosmetiske kartfarver uden forskel i styring.
 - Kaldenavne og resultater gemmes kun i rummet; ingen konti eller global

@@ -1,3 +1,4 @@
+import { Peer as PeerClient, type DataConnection } from "peerjs";
 import { RaceScene, type PickupView, type PlayerView } from "./game.js";
 import "./style.css";
 
@@ -26,14 +27,8 @@ interface InputState {
   useItem: boolean;
 }
 
-interface SignalCode {
-  type: "offer" | "answer";
-  sdp: RTCSessionDescriptionInit;
-}
-
-interface Peer {
-  connection: RTCPeerConnection;
-  channel: RTCDataChannel | null;
+interface PeerConnection {
+  channel: DataConnection;
   playerId: string;
 }
 
@@ -83,12 +78,13 @@ const errorElement = byId<HTMLElement>("error");
 const nicknameInput = byId<HTMLInputElement>("nickname");
 const roleInput = byId<HTMLSelectElement>("role");
 const kartStyleInput = byId<HTMLSelectElement>("kart-style");
-const roomIdInput = byId<HTMLTextAreaElement>("room-id");
+const roomIdInput = byId<HTMLInputElement>("room-id");
 const createButton = byId<HTMLButtonElement>("create-button");
 const soloButton = byId<HTMLButtonElement>("solo-button");
 const joinButton = byId<HTMLButtonElement>("join-button");
 const startButton = byId<HTMLButtonElement>("start-button");
 const copyLinkButton = byId<HTMLButtonElement>("copy-link");
+const inviteLink = byId<HTMLElement>("invite-link");
 const playersList = byId<HTMLUListElement>("players");
 const lobbyStatus = byId<HTMLElement>("lobby-status");
 const standings = byId<HTMLElement>("standings");
@@ -100,15 +96,11 @@ const raceStatus = byId<HTMLElement>("race-status");
 const speedLabel = byId<HTMLElement>("speed");
 const speedFill = byId<HTMLElement>("speed-fill");
 const toast = byId<HTMLElement>("toast");
-const signalInput = byId<HTMLTextAreaElement>("signal-input");
-const signalAction = byId<HTMLButtonElement>("signal-action");
-
 let game: RaceScene | null = null;
 let localSessionId = "";
 let hostMode = false;
 let isHost = false;
-let awaitingAnswer = false;
-let pendingPeer: Peer | null = null;
+let peerClient: PeerClient | null = null;
 let inputTimer = 0;
 let simulationTimer = 0;
 let toastTimer = 0;
@@ -118,10 +110,13 @@ let soloCountdownLeft = 0;
 let soloBoostRemaining = 0;
 let soloMode = false;
 let raceState: RaceState | null = null;
-let peer: Peer | null = null;
-const peers = new Map<string, Peer>();
+let peer: PeerConnection | null = null;
+const peers = new Map<string, PeerConnection>();
 const playerInputs = new Map<string, InputState>();
 const heldKeys = new Set<string>();
+
+const joinedRoomFromUrl = new URLSearchParams(window.location.search).get("room");
+if (joinedRoomFromUrl) roomIdInput.value = joinedRoomFromUrl;
 
 function showError(message: string): void {
   errorElement.textContent = message;
@@ -176,43 +171,11 @@ function deserializeState(state: SerializedRaceState): RaceState {
   };
 }
 
-function encodeSignal(signal: SignalCode): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(signal));
-  let binary = "";
-  bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function decodeSignal(value: string): SignalCode {
-  try {
-    const base64 = value.trim().replace(/-/g, "+").replace(/_/g, "/");
-    const binary = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("type" in parsed) ||
-      !("sdp" in parsed) ||
-      (parsed.type !== "offer" && parsed.type !== "answer") ||
-      typeof parsed.sdp !== "object" ||
-      parsed.sdp === null ||
-      !("type" in parsed.sdp) ||
-      !("sdp" in parsed.sdp)
-    ) {
-      throw new Error("Ugyldig forbindelseskode.");
-    }
-    return parsed as SignalCode;
-  } catch {
-    throw new Error("Koden kunne ikke læses. Kontrollér, at hele koden er kopieret.");
-  }
-}
-
 function syncLobby(state: RaceState): void {
   if (!hostMode) return;
   const racers = [...state.players.values()].filter((player) => player.role === "racer").length;
   const spectators = [...state.players.values()].filter((player) => player.role === "spectator").length;
-  lobbyStatus.textContent = `${racers}/${MAX_RACERS} racere og ${spectators}/${MAX_SPECTATORS} tilskuere. Del en ny forbindelseskode for hver spiller.`;
+  lobbyStatus.textContent = `${racers}/${MAX_RACERS} racere og ${spectators}/${MAX_SPECTATORS} tilskuere. Del invitationslinket med spillerne.`;
 }
 
 function renderState(state: RaceState): void {
@@ -307,8 +270,8 @@ function renderResults(result: RaceResult): void {
   resultsPanel.classList.remove("hidden");
 }
 
-function sendToPeer(target: Peer, message: PeerMessage): void {
-  if (target.channel?.readyState === "open") target.channel.send(JSON.stringify(message));
+function sendToPeer(target: PeerConnection, message: PeerMessage): void {
+  if (target.channel.open) target.channel.send(message);
 }
 
 function broadcast(message: PeerMessage): void {
@@ -323,31 +286,44 @@ function publishState(): void {
 }
 
 function removePlayer(playerId: string): void {
-  if (!raceState) return;
+  if (!raceState || !peers.has(playerId)) return;
   raceState.players.delete(playerId);
   playerInputs.delete(playerId);
   const disconnected = peers.get(playerId);
-  disconnected?.connection.close();
+  disconnected?.channel.close();
   peers.delete(playerId);
   publishState();
 }
 
-function handlePeerMessage(source: Peer, message: PeerMessage): void {
+function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
   if (!raceState) return;
   if (isHost) {
     if (message.type === "hello") {
+      const name = typeof message.player.name === "string"
+        ? message.player.name.trim().replace(/\s+/g, " ").slice(0, 20)
+        : "";
+      const role = message.player.role === "spectator" ? "spectator" : "racer";
+      if (!name) {
+        sendToPeer(source, { type: "error", message: "Skriv et gyldigt kaldenavn før du deltager." });
+        source.channel.close();
+        return;
+      }
       const racerCount = [...raceState.players.values()].filter((player) => player.role === "racer").length;
       const spectatorCount = [...raceState.players.values()].filter((player) => player.role === "spectator").length;
       if (
         raceState.phase !== "lobby" ||
-        (message.player.role === "racer" && racerCount >= MAX_RACERS) ||
-        (message.player.role === "spectator" && spectatorCount >= MAX_SPECTATORS)
+        (role === "racer" && racerCount >= MAX_RACERS) ||
+        (role === "spectator" && spectatorCount >= MAX_SPECTATORS)
       ) {
         sendToPeer(source, { type: "error", message: "Lobbyen er fuld, eller løbet er allerede startet." });
-        source.connection.close();
+        source.channel.close();
         return;
       }
-      raceState.players.set(source.playerId, message.player);
+      const player = makePlayer(name, role, "lime");
+      if (role === "racer" && Object.values(KART_COLORS).includes(message.player.color)) {
+        player.color = message.player.color;
+      }
+      raceState.players.set(source.playerId, player);
       playerInputs.set(source.playerId, { throttle: false, brake: false, steer: 0, useItem: false });
       sendToPeer(source, { type: "welcome", playerId: source.playerId });
       publishState();
@@ -355,7 +331,13 @@ function handlePeerMessage(source: Peer, message: PeerMessage): void {
     }
     if (message.type === "input") {
       if (raceState.players.get(source.playerId)?.role === "racer" && raceState.phase === "racing") {
-        playerInputs.set(source.playerId, message.input);
+        const input = message.input;
+        playerInputs.set(source.playerId, {
+          throttle: input?.throttle === true,
+          brake: input?.brake === true,
+          steer: input?.steer === -1 || input?.steer === 1 ? input.steer : 0,
+          useItem: input?.useItem === true,
+        });
       }
       return;
     }
@@ -365,9 +347,6 @@ function handlePeerMessage(source: Peer, message: PeerMessage): void {
   }
   if (message.type === "welcome") {
     localSessionId = message.playerId;
-    return;
-  }
-  if (message.type === "hello") {
     return;
   }
   if (message.type === "error") {
@@ -382,39 +361,28 @@ function handlePeerMessage(source: Peer, message: PeerMessage): void {
   if (message.type === "results") renderResults(message.result);
 }
 
-function configurePeer(target: Peer, channel: RTCDataChannel): void {
-  target.channel = channel;
-  channel.onopen = () => {
+function configurePeer(target: PeerConnection, name?: string, role?: "racer" | "spectator", kartStyle?: string): void {
+  const channel = target.channel;
+  channel.on("open", () => {
     if (!isHost) {
       lobbyStatus.textContent = "Forbundet med værten.";
+      if (name && role) sendToPeer(target, { type: "hello", player: makePlayer(name, role, kartStyle ?? "lime") });
       return;
     }
-    lobbyStatus.textContent = "Spilleren er forbundet. Del næste kode for at invitere flere.";
-  };
-  channel.onmessage = (event: MessageEvent<string>) => {
-    try {
-      const message = JSON.parse(event.data) as PeerMessage;
-      handlePeerMessage(target, message);
-    } catch {
+    lobbyStatus.textContent = "Spilleren er forbundet. Del invitationslinket med flere.";
+  });
+  channel.on("data", (data) => {
+    if (typeof data !== "object" || data === null || !("type" in data) || typeof data.type !== "string") {
       showToast("Modtog en ugyldig spilbesked.");
+      return;
     }
-  };
-  channel.onclose = () => {
+    handlePeerMessage(target, data as PeerMessage);
+  });
+  channel.on("close", () => {
     if (isHost) removePlayer(target.playerId);
     else showToast("Forbindelsen til værten blev afbrudt.");
-  };
-}
-
-function createHostPeerConnection(playerId: string): Peer {
-  const connection = new RTCPeerConnection(RTC_CONFIGURATION);
-  const target: Peer = { connection, channel: null, playerId };
-  configurePeer(target, connection.createDataChannel("au-race", { ordered: true }));
-  connection.onconnectionstatechange = () => {
-    if (connection.connectionState === "failed" || connection.connectionState === "closed") {
-      if (isHost) removePlayer(playerId);
-    }
-  };
-  return target;
+  });
+  channel.on("error", () => showError("Forbindelsen til spilleren fejlede."));
 }
 
 function showLobby(): void {
@@ -424,7 +392,7 @@ function showLobby(): void {
   resultsPanel.classList.add("hidden");
 }
 
-async function createRoom(): Promise<void> {
+function createRoom(): void {
   const name = safeName();
   if (!name) {
     showError("Skriv et kaldenavn på 1–20 tegn.");
@@ -434,154 +402,89 @@ async function createRoom(): Promise<void> {
   resetSession();
   isHost = true;
   hostMode = true;
-  localSessionId = crypto.randomUUID();
-  raceState = {
-    players: new Map(),
-    pickups: new Map(),
-    hostId: localSessionId,
-    phase: "lobby",
-    countdown: 0,
-    elapsed: 0,
-    laps: 3,
-  };
-  const player = makePlayer(name, "racer", kartStyleInput.value);
-  player.host = true;
-  raceState.players.set(localSessionId, player);
-  playerInputs.set(localSessionId, { throttle: false, brake: false, steer: 0, useItem: false });
-  signalInput.value = "";
-  signalInput.placeholder = "Tryk på knappen for at lave en forbindelseskode.";
-  signalAction.textContent = "Lav forbindelseskode";
-  signalAction.disabled = false;
-  awaitingAnswer = false;
-  copyLinkButton.textContent = "Kopiér kode";
+  lobbyStatus.textContent = "Opretter lobby og invitationslink …";
   showError("");
+  peerClient = new PeerClient({ config: RTC_CONFIGURATION });
+  peerClient.on("open", (id) => {
+    localSessionId = id;
+    raceState = {
+      players: new Map(),
+      pickups: new Map(),
+      hostId: localSessionId,
+      phase: "lobby",
+      countdown: 0,
+      elapsed: 0,
+      laps: 3,
+    };
+    const player = makePlayer(name, "racer", kartStyleInput.value);
+    player.host = true;
+    raceState.players.set(localSessionId, player);
+    playerInputs.set(localSessionId, { throttle: false, brake: false, steer: 0, useItem: false });
+    const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(id)}`;
+    inviteLink.textContent = url;
+    inviteLink.setAttribute("href", url);
+    showLobby();
+    game = new RaceScene(document.body, localSessionId);
+    renderState(raceState);
+    startInputUpdates();
+  });
+  peerClient.on("connection", (channel) => {
+    const target: PeerConnection = { channel, playerId: channel.peer };
+    peers.set(target.playerId, target);
+    configurePeer(target);
+  });
+  peerClient.on("error", (error) => {
+    showError(`Signaltjenesten kunne ikke oprette lobbyen: ${error.message}`);
+  });
+  peerClient.on("disconnected", () => {
+    showError("Forbindelsen til signaltjenesten blev afbrudt. Genindlæs siden for at oprette en ny lobby.");
+  });
   showLobby();
-  game = new RaceScene(document.body, localSessionId);
-  renderState(raceState);
-  startInputUpdates();
+  game = new RaceScene(document.body, "");
+  copyLinkButton.textContent = "Kopiér invitationslink";
 }
 
-async function createOffer(): Promise<void> {
-  try {
-    if (pendingPeer) {
-      pendingPeer.connection.close();
-      pendingPeer = null;
-    }
-    const playerId = crypto.randomUUID();
-    const target = createHostPeerConnection(playerId);
-    pendingPeer = target;
-    const offer = await target.connection.createOffer();
-    await target.connection.setLocalDescription(offer);
-    await waitForIce(target.connection);
-    signalInput.value = encodeSignal({ type: "offer", sdp: target.connection.localDescription! });
-    awaitingAnswer = true;
-    lobbyStatus.textContent = "Send koden til én spiller. Når spilleren sender sin svar-kode retur, skal den indsættes her.";
-    signalAction.textContent = "Tilslut med svar-kode";
-  } catch (error) {
-    showError(error instanceof Error ? error.message : "Forbindelseskoden kunne ikke oprettes.");
-  }
-}
-
-async function acceptAnswer(): Promise<void> {
-  if (!pendingPeer) {
-    showError("Lav først en forbindelseskode.");
-    return;
-  }
-  try {
-    const signal = decodeSignal(signalInput.value);
-    if (signal.type !== "answer") throw new Error("Indsæt spillerens svar-kode, ikke din egen invitationskode.");
-    await pendingPeer.connection.setRemoteDescription(signal.sdp);
-    peers.set(pendingPeer.playerId, pendingPeer);
-    pendingPeer = null;
-    awaitingAnswer = false;
-    signalInput.value = "";
-    signalAction.textContent = "Lav ny forbindelseskode";
-    lobbyStatus.textContent = "Forbinder til spilleren. Lav en ny kode, når forbindelsen er klar.";
-  } catch (error) {
-    showError(error instanceof Error ? error.message : "Svar-koden kunne ikke bruges.");
-  }
-}
-
-async function joinRoom(): Promise<void> {
+function joinRoom(): void {
   const name = safeName();
   if (!name) {
     showError("Skriv et kaldenavn på 1–20 tegn.");
     nicknameInput.focus();
     return;
   }
-  const signalText = roomIdInput.value.trim();
-  if (!signalText) {
-    showError("Indsæt værtens forbindelseskode.");
+  const roomId = roomIdInput.value.trim() || joinedRoomFromUrl || "";
+  if (!roomId) {
+    showError("Åbn værtens invitationslink eller indsæt lobbykoden.");
     roomIdInput.focus();
     return;
   }
-  try {
-    resetSession();
-    const signal = decodeSignal(signalText);
-    if (signal.type !== "offer") throw new Error("Koden skal være værtens invitationskode.");
-    isHost = false;
-    hostMode = false;
-    const role = roleInput.value === "spectator" ? "spectator" : "racer";
-    localSessionId = crypto.randomUUID();
-    raceState = {
-      players: new Map(),
-      pickups: new Map(),
-      hostId: "",
-      phase: "lobby",
-      countdown: 0,
-      elapsed: 0,
-      laps: 3,
-    };
-    const connection = new RTCPeerConnection(RTC_CONFIGURATION);
-    const target: Peer = { connection, channel: null, playerId: "" };
+  resetSession();
+  isHost = false;
+  hostMode = false;
+  const role = roleInput.value === "spectator" ? "spectator" : "racer";
+  raceState = {
+    players: new Map(),
+    pickups: new Map(),
+    hostId: roomId,
+    phase: "lobby",
+    countdown: 0,
+    elapsed: 0,
+    laps: 3,
+  };
+  showError("");
+  lobbyStatus.textContent = "Forbinder til lobbyen …";
+  showLobby();
+  game = new RaceScene(document.body, "");
+  peerClient = new PeerClient({ config: RTC_CONFIGURATION });
+  peerClient.on("open", () => {
+    if (!peerClient) return;
+    const channel = peerClient.connect(roomId, { reliable: true, serialization: "json" });
+    const target: PeerConnection = { channel, playerId: roomId };
     peer = target;
-    connection.ondatachannel = (event) => {
-      configurePeer(target, event.channel);
-      const announce = () => sendToPeer(target, {
-        type: "hello",
-        player: makePlayer(name, role, kartStyleInput.value),
-      });
-      if (event.channel.readyState === "open") announce();
-      else event.channel.addEventListener("open", announce, { once: true });
-    };
-    connection.onconnectionstatechange = () => {
-      if (connection.connectionState === "failed" || connection.connectionState === "closed") {
-        showError("Forbindelsen til værten blev afbrudt.");
-      }
-    };
-    await connection.setRemoteDescription(signal.sdp);
-    const answer = await connection.createAnswer();
-    await connection.setLocalDescription(answer);
-    await waitForIce(connection);
-    signalInput.value = encodeSignal({ type: "answer", sdp: connection.localDescription! });
-    signalInput.readOnly = true;
-    signalAction.textContent = "Svar-kode klar";
-    signalAction.disabled = true;
-    showError("");
-    showLobby();
-    lobbyStatus.textContent = "Send svar-koden nedenfor til værten. Lobbyen åbner, når værten har tilsluttet den.";
-    game = new RaceScene(document.body, localSessionId);
+    configurePeer(target, name, role, kartStyleInput.value);
     startInputUpdates();
-  } catch (error) {
-    resetSession();
-    showError(error instanceof Error ? error.message : "Forbindelseskoden kunne ikke bruges.");
-  }
-}
-
-function waitForIce(connection: RTCPeerConnection): Promise<void> {
-  if (connection.iceGatheringState === "complete") return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      connection.removeEventListener("icegatheringstatechange", checkState);
-      reject(new Error("Netværksoplysningerne kunne ikke hentes. Prøv igen."));
-    }, 12000);
-    const checkState = () => {
-      if (connection.iceGatheringState !== "complete") return;
-      window.clearTimeout(timeout);
-      connection.removeEventListener("icegatheringstatechange", checkState);
-      resolve();
-    };
-    connection.addEventListener("icegatheringstatechange", checkState);
+  });
+  peerClient.on("error", (error) => {
+    showError(`Kunne ikke forbinde til lobbyen: ${error.message}`);
   });
 }
 
@@ -840,11 +743,11 @@ function resetSession(): void {
   window.clearInterval(simulationTimer);
   window.clearInterval(soloTimer);
   heldKeys.clear();
-  pendingPeer?.connection.close();
-  pendingPeer = null;
-  peer?.connection.close();
+  peerClient?.destroy();
+  peerClient = null;
+  peer?.channel.close();
   peer = null;
-  for (const connectedPeer of peers.values()) connectedPeer.connection.close();
+  for (const connectedPeer of peers.values()) connectedPeer.channel.close();
   peers.clear();
   playerInputs.clear();
   game?.dispose();
@@ -855,10 +758,8 @@ function resetSession(): void {
   hostMode = false;
   isHost = false;
   soloBoostRemaining = 0;
-  signalInput.readOnly = false;
-  signalInput.value = "";
-  signalAction.disabled = false;
-  awaitingAnswer = false;
+  inviteLink.textContent = "";
+  inviteLink.removeAttribute("href");
 }
 
 createButton.addEventListener("click", (event) => {
@@ -877,20 +778,12 @@ returnButton.addEventListener("click", () => {
   else if (peer) sendToPeer(peer, { type: "returnToLobby" });
 });
 soloButton.addEventListener("click", startSoloTimeTrial);
-signalAction.addEventListener("click", () => {
-  if (hostMode) {
-    if (awaitingAnswer) void acceptAnswer();
-    else void createOffer();
-  }
-});
 copyLinkButton.addEventListener("click", async () => {
   try {
-    await navigator.clipboard.writeText(signalInput.value);
-    showToast("Forbindelseskode kopieret.");
+    await navigator.clipboard.writeText(inviteLink.textContent ?? "");
+    showToast("Invitationslink kopieret.");
   } catch {
-    signalInput.focus();
-    signalInput.select();
-    showToast("Markér og kopiér koden manuelt.");
+    showError("Kopiér invitationslinket manuelt fra feltet.");
   }
 });
 window.addEventListener("keydown", (event) => {

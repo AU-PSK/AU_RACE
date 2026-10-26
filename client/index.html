@@ -12,7 +12,7 @@
       <section id="menu" class="panel">
         <div class="eyebrow">AU RACE · BROWSERPROTOTYPE</div>
         <h1>Universitetsparken<br /><span>Grand Prix</span></h1>
-        <p class="intro">En original gokartbane inspireret af campus. Kør alene på tid, eller forbind direkte til andre via WebRTC.</p>
+        <p class="intro">En original gokartbane inspireret af campus. Kør alene på tid, eller invitér andre direkte med et link.</p>
         <form id="join-form">
           <label for="nickname">Kaldenavn</label>
           <input id="nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="Dit navn på banen" required />
@@ -30,10 +30,10 @@
           </select>
           <button id="create-button" type="button">Opret peer-to-peer-løb</button>
           <button id="solo-button" class="secondary" type="button">Spil solo på tid</button>
-          <div class="join-divider">eller deltag via WebRTC-kode</div>
-          <label for="room-id">Værtens invitationskode</label>
-          <textarea id="room-id" name="roomId" rows="4" autocomplete="off" placeholder="Indsæt værtens invitationskode"></textarea>
-          <button id="join-button" class="secondary" type="button">Lav svar-kode</button>
+          <div class="join-divider">eller deltag via invitationslink</div>
+          <label for="room-id">Lobbylink eller kode</label>
+          <input id="room-id" name="roomId" autocomplete="off" placeholder="Åbn linket eller indsæt koden" />
+          <button id="join-button" class="secondary" type="button">Deltag i løb</button>
         </form>
         <p id="error" class="error" role="alert" aria-live="polite"></p>
         <p class="fine-print">Ingen konto · Op til 4 racere og 8 tilskuere · Direkte forbindelser kan blokeres af visse netværk · Ingen officiel AU-branding</p>
@@ -42,11 +42,10 @@
       <section id="lobby" class="panel hidden">
         <div class="eyebrow">PRIVAT LOBBY</div>
         <h2>Venter ved startlinjen</h2>
-        <p>Forbindelsen oprettes direkte mellem browserne. Udveksl invitations- og svar-koder manuelt.</p>
-        <label for="signal-input">Forbindelseskode</label>
-        <textarea id="signal-input" rows="5" autocomplete="off" spellcheck="false" placeholder="Forbindelseskoden vises her"></textarea>
-        <button id="copy-link" class="secondary" type="button">Kopiér kode</button>
-        <button id="signal-action" class="secondary" type="button">Lav forbindelseskode</button>
+        <p>Del lobbylinket. Når dine venner åbner det, kan de vælge navn, kart og rolle og deltage direkte.</p>
+        <label for="invite-link">Offentligt invitationslink</label>
+        <a id="invite-link" class="invite-link" href=""></a>
+        <button id="copy-link" class="secondary" type="button">Kopiér invitationslink</button>
         <h3>Spillere</h3>
         <ul id="players"></ul>
         <button id="start-button" type="button" disabled>Start løb</button>
