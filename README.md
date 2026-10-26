@@ -43,7 +43,8 @@ udgivet og tilgængelig først.
 
 Skriv et kaldenavn og vælg **Opret privat rum** for at være vært, eller indsæt
 et invitationslink/rumkode og vælg **Deltag i rum**. Vælg tilskuerrollen, hvis
-du kun vil følge et løb. Værten kan starte, når mindst to racere er i lobbyen.
+du kun vil følge et løb. En enkelt racer kan starte en tidskørsel alene; med
+flere racere starter værten et fælles løb.
 
 Kør med **W / ↑**, brems med **S / ↓**, skift bane med **A / D / ← / →**, og
 brug en samlet bonus med **Mellemrum**.
