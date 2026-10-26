@@ -174,8 +174,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       return;
     }
     if (this.state.phase !== "lobby") return;
-    if (this.racerCount() < 2) {
-      client.send("error", { message: "Der skal være mindst to racere for at starte." });
+    if (this.racerCount() < 1) {
+      client.send("error", { message: "Der skal være mindst én racer for at starte." });
       return;
     }
 

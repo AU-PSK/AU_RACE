@@ -120,7 +120,7 @@ async function connect(create: boolean): Promise<void> {
     lobbyStatus.textContent =
       role === "spectator"
         ? "Du er tilskuer og kan følge løbet live."
-        : "Værten kan starte, når mindst to racere er klar.";
+        : "Du kan starte en tidskørsel alene eller invitere andre til løbet.";
     game = new RaceScene(document.body, localSessionId);
 
     room.onStateChange((state) => renderState(state));
@@ -166,15 +166,18 @@ function renderState(state: RaceState): void {
   }
 
   startButton.classList.toggle("hidden", !isHost);
-  startButton.disabled = racers.length < 2 || state.phase !== "lobby";
+  startButton.disabled = racers.length === 0 || state.phase !== "lobby";
+  startButton.textContent = racers.length === 1 ? "Start tidskørsel" : "Start løb";
   returnButton.classList.toggle("hidden", !isHost);
   if (state.phase === "lobby") {
     menu.classList.add("hidden");
     lobby.classList.remove("hidden");
     raceHud.classList.add("hidden");
-    lobbyStatus.textContent = racers.length < 2
-      ? "Del invitationslinket. Der skal være mindst to racere for at starte."
-      : `${racers.length}/4 racere og ${spectators.length}/8 tilskuere er klar.`;
+    lobbyStatus.textContent = racers.length === 0
+      ? "Der skal være mindst én racer for at starte. Du kan også køre alene på tid."
+      : racers.length === 1
+        ? `Tidskørsel klar · ${spectators.length}/8 tilskuere. Invitér andre for at køre mod dem.`
+        : `${racers.length}/4 racere og ${spectators.length}/8 tilskuere er klar.`;
   } else {
     lobby.classList.add("hidden");
     raceHud.classList.remove("hidden");
@@ -188,11 +191,14 @@ function renderState(state: RaceState): void {
       : `${Math.round((me?.speed ?? 0) * 100)}`;
     speedFill.style.width = `${Math.min(100, ((me?.speed ?? 0) / 1.35) * 100)}%`;
     if (state.phase === "countdown") {
-      raceStatus.textContent = `STARTER OM ${state.countdown}`;
+      raceStatus.textContent = racers.length === 1
+        ? `TIDSKØRSEL · STARTER OM ${state.countdown}`
+        : `STARTER OM ${state.countdown}`;
     } else if (state.phase === "racing") {
-      raceStatus.textContent = me?.hasItem ? "CAMPUS-PULS KLAR · MELLEMRUM" : "LØBET ER I GANG";
+      const status = me?.hasItem ? "CAMPUS-PULS KLAR · MELLEMRUM" : "LØBET ER I GANG";
+      raceStatus.textContent = racers.length === 1 ? `TIDSKØRSEL · ${status}` : status;
     } else {
-      raceStatus.textContent = "LØBET ER SLUT";
+      raceStatus.textContent = racers.length === 1 ? "TIDSKØRSEL · LØBET ER SLUT" : "LØBET ER SLUT";
     }
     renderStandings(players);
   }
