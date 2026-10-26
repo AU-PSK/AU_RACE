@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10171b" />
+    <meta name="description" content="Et originalt browserbaseret gokartspil inspireret af Universitetsparken." />
+    <title>AU Race — Universitetsparken</title>
+  </head>
+  <body>
+    <main id="app">
+      <section id="menu" class="panel">
+        <div class="eyebrow">AU RACE · BROWSERPROTOTYPE</div>
+        <h1>Universitetsparken<br /><span>Grand Prix</span></h1>
+        <p class="intro">En original gokartbane inspireret af campus. Inviter andre med et privat rumlink.</p>
+        <form id="join-form">
+          <label for="nickname">Kaldenavn</label>
+          <input id="nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="Dit navn på banen" required />
+          <label for="role">Deltag som</label>
+          <select id="role" name="role">
+            <option value="racer">Racer</option>
+            <option value="spectator">Tilskuer</option>
+          </select>
+          <label for="kart-style">Kartfarve</label>
+          <select id="kart-style" name="kartStyle">
+            <option value="lime">Campus Lime</option>
+            <option value="clay">Tegl</option>
+            <option value="fjord">Fjord</option>
+            <option value="violet">Aftenlilla</option>
+          </select>
+          <button id="create-button" type="submit">Opret privat rum</button>
+          <div class="join-divider">eller deltag i et rum</div>
+          <label for="room-id">Rumkode eller invitationslink</label>
+          <input id="room-id" name="roomId" autocomplete="off" placeholder="Indsæt link eller rumkode" />
+          <button id="join-button" class="secondary" type="button">Deltag i rum</button>
+        </form>
+        <p id="error" class="error" role="alert" aria-live="polite"></p>
+        <p class="fine-print">Ingen konto · Op til 4 racere og 8 tilskuere · Ingen officiel AU-branding</p>
+      </section>
+
+      <section id="lobby" class="panel hidden">
+        <div class="eyebrow">PRIVAT LOBBY</div>
+        <h2>Venter ved startlinjen</h2>
+        <p>Del invitationslinket med dem, du vil køre med.</p>
+        <div class="invite-row"><code id="invite-link"></code><button id="copy-link" class="secondary" type="button">Kopiér</button></div>
+        <h3>Spillere</h3>
+        <ul id="players"></ul>
+        <button id="start-button" type="button" disabled>Start løb</button>
+        <p id="lobby-status" class="fine-print">Værten kan starte, når mindst to racere er klar.</p>
+        <button id="leave-button" class="text-button" type="button">Forlad rum</button>
+      </section>
+
+      <section id="race-hud" class="hidden">
+        <div class="hud-top">
+          <div class="hud-brand">AU <span>RACE</span></div>
+          <div id="race-status">AFVENTER START</div>
+          <div class="hud-lap">OMG. <strong id="lap">0 / 3</strong></div>
+        </div>
+        <div class="hud-bottom">
+          <div id="standings" class="standings"></div>
+          <div class="speedometer">
+            <div class="speed-label"><span>FART</span><strong id="speed">0</strong></div>
+            <div class="speed-track"><span id="speed-fill"></span></div>
+          </div>
+          <div class="controls">W / ↑ GAS <span>·</span> A D / ← → STYR <span>·</span> S / ↓ BREMS</div>
+        </div>
+        <div id="results" class="panel results hidden">
+          <div class="eyebrow">LØBET ER SLUT</div>
+          <h2>Resultat</h2>
+          <ol id="result-list"></ol>
+          <button id="return-button" type="button">Tilbage til lobby</button>
+        </div>
+      </section>
+      <div id="toast" class="toast hidden" role="status"></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
