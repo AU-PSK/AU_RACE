@@ -7,11 +7,10 @@
     "server"
   ],
   "scripts": {
-    "dev": "concurrently -k -n server,client -c cyan,green \"npm:dev --workspace server\" \"npm:dev --workspace client\"",
-    "build": "npm run build --workspace server && npm run build --workspace client"
+    "dev": "npm run dev --workspace client",
+    "build": "npm run build --workspace client"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
     "typescript": "^5.9.3"
   }
 }
