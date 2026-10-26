@@ -15,6 +15,8 @@ Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke of
 
 - Bane og omgivelser er genereret fra OpenStreetMap (`tools/`), så rundstrækningen følger de virkelige veje og bygninger. Kortdata kræver kildeangivelse (ODbL).
 
+- Kørslen er fri bevægelse (position, retning, fart) styret af vært-browseren: terrænkørsel, kollision med bygninger, træer og andre karts, drift med mini-turbo og tre bonustyper.
+
 ## Kendte begrænsninger
 
 - Forsvinder værten, ender løbet for alle. Gæsterne får en tydelig besked og sendes tilbage til menuen; værten overdrages ikke.

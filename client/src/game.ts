@@ -1,36 +1,23 @@
 import * as THREE from "three";
 import { campus } from "./campus-data.js";
+import type { PlayerState, RaceObject } from "./race.js";
 import { route, TRACK_WIDTH, trackPosition } from "./track.js";
-
-export interface PlayerView {
-  name: string;
-  role: string;
-  color: string;
-  progress: number;
-  speed: number;
-  lane: number;
-  lap: number;
-  place: number;
-  finished: boolean;
-  finishTime: number;
-  host: boolean;
-  hasItem: boolean;
-}
-
-export interface PickupView {
-  id: string;
-  progress: number;
-  lane: number;
-  active: boolean;
-}
+import { trees } from "./world.js";
 
 interface KartMesh {
   root: THREE.Group;
+  body: THREE.Group;
   wheels: THREE.Mesh[];
+  sparks: THREE.Mesh[];
+  sparkMaterial: THREE.MeshBasicMaterial;
+  flame: THREE.Mesh;
   color: string;
   name: string;
   nameCanvas: HTMLCanvasElement;
   nameLabel: THREE.Sprite;
+  target: PlayerState;
+  heading: number;
+  slide: number;
 }
 
 export class RaceScene {
@@ -38,8 +25,8 @@ export class RaceScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private karts = new Map<string, KartMesh>();
-  private pickupMeshes = new Map<string, THREE.Mesh>();
-  private focusKart: THREE.Group | null = null;
+  private objectMeshes = new Map<string, THREE.Group>();
+  private focusKart: KartMesh | null = null;
   private sun: THREE.DirectionalLight;
   private lastTime = 0;
   private running = true;
@@ -48,7 +35,7 @@ export class RaceScene {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#a9c5c0");
     this.scene.fog = new THREE.Fog("#a9c5c0", 110, 280);
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 420);
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 420);
     this.camera.position.set(0, 19, 28);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
@@ -76,28 +63,29 @@ export class RaceScene {
     this.renderer.setAnimationLoop(this.render);
   }
 
-  updatePlayers(players: Iterable<[string, PlayerView]>): void {
+  // Simuleringen kører med 30 Hz; her gemmes kun målet, og render() glider blødt derhen.
+  // focusId er den lokale spiller; en gæst kender først sit id, når værten har sagt velkommen.
+  updatePlayers(players: Iterable<[string, PlayerState]>, focusId = this.mySessionId): void {
     const activeIds = new Set<string>();
     let leader: KartMesh | null = null;
-    let leaderProgress = -1;
+    let leaderProgress = -Infinity;
     for (const [id, data] of players) {
       if (data.role !== "racer") continue;
       activeIds.add(id);
       let kart = this.karts.get(id);
       if (!kart) {
-        kart = this.createKart(data.color, data.name);
+        kart = this.createKart(data);
         this.karts.set(id, kart);
         this.scene.add(kart.root);
       } else if (kart.name !== data.name) {
         this.updateNameLabel(kart, data.name);
       }
-
-      const progress = data.finished ? 0.998 : data.progress;
-      const position = trackPosition(progress, data.lane);
-      const tangent = route.getTangentAt(((progress % 1) + 1) % 1);
-      kart.root.position.set(position.x, 0.12, position.z);
-      kart.root.rotation.y = Math.atan2(-tangent.x, -tangent.z);
-      for (const wheel of kart.wheels) wheel.rotation.x += data.speed * 0.22;
+      // Store spring (genstart på banen) tages med det samme i stedet for at glide hen over græsset.
+      if (Math.hypot(kart.root.position.x - data.x, kart.root.position.z - data.z) > 12) {
+        kart.root.position.set(data.x, 0.12, data.z);
+        kart.heading = data.heading;
+      }
+      kart.target = data;
       if (!data.finished && data.progress > leaderProgress) {
         leader = kart;
         leaderProgress = data.progress;
@@ -111,37 +99,71 @@ export class RaceScene {
         this.karts.delete(id);
       }
     }
-    this.focusKart = this.karts.get(this.mySessionId)?.root ?? leader?.root ?? null;
+    this.focusKart = this.karts.get(focusId) ?? leader ?? null;
   }
 
-  updatePickups(pickups: Iterable<[string, PickupView]>): void {
+  updateObjects(objects: Iterable<[string, RaceObject]>): void {
     const activeIds = new Set<string>();
-    for (const [id, pickup] of pickups) {
+    for (const [id, object] of objects) {
       activeIds.add(id);
-      let mesh = this.pickupMeshes.get(id);
+      let mesh = this.objectMeshes.get(id);
       if (!mesh) {
-        const material = new THREE.MeshStandardMaterial({
-          color: "#d7f36a",
-          emissive: "#7d9b28",
-          emissiveIntensity: 1.4,
-          metalness: 0.2,
-          roughness: 0.3,
-        });
-        mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.72, 0), material);
-        mesh.castShadow = true;
-        this.pickupMeshes.set(id, mesh);
+        mesh = this.createObjectMesh(object.kind);
+        mesh.position.set(object.x, mesh.position.y, object.z);
+        this.objectMeshes.set(id, mesh);
         this.scene.add(mesh);
       }
-      mesh.visible = pickup.active;
-      const position = trackPosition(pickup.progress, pickup.lane);
-      mesh.position.set(position.x, 1.35, position.z);
+      mesh.visible = object.active;
+      mesh.userData.targetX = object.x;
+      mesh.userData.targetZ = object.z;
+      if (object.kind === "paper") mesh.rotation.y = object.heading;
     }
-    for (const [id, mesh] of this.pickupMeshes) {
+    for (const [id, mesh] of this.objectMeshes) {
       if (!activeIds.has(id)) {
         this.scene.remove(mesh);
-        this.pickupMeshes.delete(id);
+        this.disposeTree(mesh);
+        this.objectMeshes.delete(id);
       }
     }
+  }
+
+  private createObjectMesh(kind: RaceObject["kind"]): THREE.Group {
+    const group = new THREE.Group();
+    group.userData.kind = kind;
+    if (kind === "box") {
+      const shell = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 1.2, 1.2),
+        new THREE.MeshStandardMaterial({
+          color: "#d7f36a", emissive: "#7d9b28", emissiveIntensity: 0.8,
+          transparent: true, opacity: 0.55, roughness: 0.2,
+        }),
+      );
+      const core = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.38, 0),
+        new THREE.MeshStandardMaterial({ color: "#ffffff", emissive: "#f4f6e2", emissiveIntensity: 1.2 }),
+      );
+      shell.castShadow = true;
+      group.add(shell, core);
+      group.position.y = 1.2;
+    } else if (kind === "paper") {
+      const paper = new THREE.MeshStandardMaterial({ color: "#f3efe2", roughness: 0.9 });
+      for (let i = 0; i < 4; i++) {
+        const sheet = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.12, 1.25), paper);
+        sheet.position.y = 0.06 + i * 0.12;
+        sheet.rotation.y = (i % 2 === 0 ? 1 : -1) * 0.12 * i;
+        sheet.castShadow = true;
+        group.add(sheet);
+      }
+    } else {
+      const disc = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 0.55, 0.1, 20),
+        new THREE.MeshStandardMaterial({ color: "#ff8a3d", emissive: "#a33f0a", emissiveIntensity: 0.6, roughness: 0.4 }),
+      );
+      disc.castShadow = true;
+      group.add(disc);
+      group.position.y = 0.8;
+    }
+    return group;
   }
 
   dispose(): void {
@@ -318,43 +340,10 @@ export class RaceScene {
     this.addTrees();
   }
 
-  // Træer spredes i skov og parker, men holdes væk fra banen. Instansering holder antallet af meshes nede.
+  // Træerne er placeret i world.ts, så simuleringen kan køre ind i de samme træer, som vises.
+  // Instansering holder antallet af meshes nede.
   private addTrees(): void {
-    let seed = 4813;
-    const random = () => {
-      seed = (seed * 16807) % 2147483647;
-      return (seed - 1) / 2147483646;
-    };
-    const routePoints = route.getSpacedPoints(360);
-    const nearRoute = (x: number, z: number): boolean =>
-      routePoints.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 6.5 * 6.5);
-    const inside = (flat: readonly number[], x: number, z: number): boolean => {
-      let result = false;
-      for (let i = 0, j = flat.length - 2; i < flat.length; j = i, i += 2) {
-        const [xi, zi, xj, zj] = [flat[i], flat[i + 1], flat[j], flat[j + 1]];
-        if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) result = !result;
-      }
-      return result;
-    };
-
-    const trees: Array<[number, number, number]> = [];
-    const scatter = (polygons: ReadonlyArray<readonly number[]>, perUnit: number): void => {
-      for (const flat of polygons) {
-        const xs = flat.filter((_, i) => i % 2 === 0);
-        const zs = flat.filter((_, i) => i % 2 === 1);
-        const [minX, maxX, minZ, maxZ] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
-        const attempts = Math.ceil((maxX - minX) * (maxZ - minZ) * perUnit);
-        for (let i = 0; i < attempts; i++) {
-          const x = minX + random() * (maxX - minX);
-          const z = minZ + random() * (maxZ - minZ);
-          if (inside(flat, x, z) && !nearRoute(x, z)) trees.push([x, z, 0.8 + random() * 0.9]);
-        }
-      }
-    };
-    scatter(campus.forests, 0.07);
-    scatter(campus.parks, 0.012);
     if (!trees.length) return;
-
     const trunks = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(0.16, 0.26, 2, 7),
       new THREE.MeshStandardMaterial({ color: "#594a38", roughness: 1 }),
@@ -366,7 +355,7 @@ export class RaceScene {
       trees.length,
     );
     const matrix = new THREE.Matrix4();
-    trees.forEach(([x, z, scale], index) => {
+    trees.forEach(({ x, z, scale }, index) => {
       matrix.makeScale(scale, scale, scale).setPosition(x, scale, z);
       trunks.setMatrixAt(index, matrix);
       matrix.makeScale(scale, scale, scale).setPosition(x, 2.5 * scale, z);
@@ -400,25 +389,30 @@ export class RaceScene {
     return sprite;
   }
 
-  private createKart(color: string, name: string): KartMesh {
+  // root bærer position og kørselsretning (dem følger kameraet); body bærer drift-skrid og spin.
+  private createKart(data: PlayerState): KartMesh {
+    const { color, name } = data;
     const root = new THREE.Group();
+    const body = new THREE.Group();
+    root.add(body);
+    root.position.set(data.x, 0.12, data.z);
     const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.16 });
     const dark = new THREE.MeshStandardMaterial({ color: "#202724", roughness: 0.7 });
     const seatMat = new THREE.MeshStandardMaterial({ color: "#303b37", roughness: 0.65 });
     const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.38, 2.1), paint);
     chassis.position.y = 0.48;
     chassis.castShadow = true;
-    root.add(chassis);
+    body.add(chassis);
 
     const nose = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.2, 0.55), paint);
     nose.position.set(0, 0.53, -1.17);
     nose.castShadow = true;
-    root.add(nose);
+    body.add(nose);
 
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.57, 0.72), seatMat);
     seat.position.set(0, 0.86, 0.28);
     seat.castShadow = true;
-    root.add(seat);
+    body.add(seat);
 
     const wheelGeometry = new THREE.CylinderGeometry(0.32, 0.32, 0.26, 12);
     const wheels: THREE.Mesh[] = [];
@@ -428,14 +422,33 @@ export class RaceScene {
         wheel.rotation.z = Math.PI / 2;
         wheel.position.set(x, 0.35, z);
         wheel.castShadow = true;
-        root.add(wheel);
+        body.add(wheel);
         wheels.push(wheel);
       }
     }
 
     const front = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.16, 0.14), dark);
     front.position.set(0, 0.25, -1.22);
-    root.add(front);
+    body.add(front);
+
+    // Gnister ved baghjulene under drift; farven viser, hvor stor turboen bliver.
+    const sparkMaterial = new THREE.MeshBasicMaterial({ color: "#f4f1e0" });
+    const sparks: THREE.Mesh[] = [];
+    for (const x of [-0.8, 0.8]) {
+      const spark = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), sparkMaterial);
+      spark.position.set(x, 0.18, 1.1);
+      spark.visible = false;
+      body.add(spark);
+      sparks.push(spark);
+    }
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.28, 1.1, 10),
+      new THREE.MeshBasicMaterial({ color: "#ffb347", transparent: true, opacity: 0.85 }),
+    );
+    flame.rotation.x = Math.PI / 2;
+    flame.position.set(0, 0.5, 1.6);
+    flame.visible = false;
+    body.add(flame);
 
     const labelCanvas = document.createElement("canvas");
     labelCanvas.width = 512;
@@ -447,7 +460,10 @@ export class RaceScene {
     label.position.set(0, 2.45, 0);
     label.scale.set(3.4, 0.85, 1);
     root.add(label);
-    const kart = { root, wheels, color, name, nameCanvas: labelCanvas, nameLabel: label };
+    const kart: KartMesh = {
+      root, body, wheels, sparks, sparkMaterial, flame, color, name,
+      nameCanvas: labelCanvas, nameLabel: label, target: data, heading: data.heading, slide: 0,
+    };
     this.updateNameLabel(kart, name);
     return kart;
   }
@@ -483,22 +499,52 @@ export class RaceScene {
     if (!this.running) return;
     const delta = this.lastTime ? Math.min((time - this.lastTime) / 1000, 0.06) : 0;
     this.lastTime = time;
-    for (const pickup of this.pickupMeshes.values()) {
-      if (pickup.visible) {
-        pickup.rotation.y += delta * 1.4;
-        pickup.position.y = 1.3 + Math.sin(time * 0.002 + pickup.position.x) * 0.16;
+    const follow = 1 - Math.exp(-delta * 14);
+
+    for (const kart of this.karts.values()) {
+      const data = kart.target;
+      kart.root.position.x += (data.x - kart.root.position.x) * follow;
+      kart.root.position.z += (data.z - kart.root.position.z) * follow;
+      const turn = data.heading - kart.heading;
+      kart.heading += Math.atan2(Math.sin(turn), Math.cos(turn)) * follow;
+      kart.root.rotation.y = kart.heading;
+      kart.slide += (data.driftDir * 0.38 - kart.slide) * (1 - Math.exp(-delta * 8));
+      kart.body.rotation.y = kart.slide + (data.spin > 0 ? data.spin * Math.PI * 4 : 0);
+      for (const wheel of kart.wheels) wheel.rotation.x -= (data.speed / 0.32) * delta;
+      const drifting = data.driftDir !== 0;
+      for (const spark of kart.sparks) {
+        spark.visible = drifting && Math.floor(time / 60) % 2 === 0;
+        spark.scale.setScalar(0.7 + Math.random() * 0.6);
       }
+      kart.sparkMaterial.color.set(data.driftCharge >= 1.6 ? "#ff9a3c" : data.driftCharge >= 0.7 ? "#5ab4ff" : "#f4f1e0");
+      kart.flame.visible = data.boost > 0;
+      kart.flame.scale.set(1, 0.8 + Math.random() * 0.5, 1);
+      // Blink mens kartet sættes tilbage på banen.
+      kart.root.visible = data.respawn <= 0 || Math.floor(time / 120) % 2 === 0;
     }
+
+    for (const mesh of this.objectMeshes.values()) {
+      mesh.position.x += ((mesh.userData.targetX as number) - mesh.position.x) * follow;
+      mesh.position.z += ((mesh.userData.targetZ as number) - mesh.position.z) * follow;
+      if (mesh.userData.kind === "box") {
+        mesh.rotation.y += delta * 1.2;
+        mesh.rotation.x += delta * 0.7;
+        mesh.position.y = 1.2 + Math.sin(time * 0.003 + mesh.position.x) * 0.15;
+      }
+      if (mesh.userData.kind === "frisbee") mesh.rotation.y += delta * 18;
+    }
+
     const focusKart = this.focusKart;
     if (focusKart) {
-      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(focusKart.quaternion);
-      const target = focusKart.position.clone().addScaledVector(forward, -10).add(new THREE.Vector3(0, 7, 0));
-      this.camera.position.lerp(target, 1 - Math.exp(-delta * 3));
-      const look = focusKart.position.clone().addScaledVector(forward, 4).add(new THREE.Vector3(0, 1, 0));
+      const position = focusKart.root.position;
+      const forward = new THREE.Vector3(-Math.sin(focusKart.heading), 0, -Math.cos(focusKart.heading));
+      const target = position.clone().addScaledVector(forward, -8.5).add(new THREE.Vector3(0, 4.6, 0));
+      this.camera.position.lerp(target, 1 - Math.exp(-delta * 5));
+      const look = position.clone().addScaledVector(forward, 6).add(new THREE.Vector3(0, 1, 0));
       this.camera.lookAt(look);
       // Skyggekortet følger kartet, så skyggerne er skarpe, uanset hvor på banen man er.
-      this.sun.target.position.copy(focusKart.position);
-      this.sun.position.copy(focusKart.position).add(new THREE.Vector3(-36, 56, 30));
+      this.sun.target.position.copy(position);
+      this.sun.position.copy(position).add(new THREE.Vector3(-36, 56, 30));
     }
     this.renderer.render(this.scene, this.camera);
   };

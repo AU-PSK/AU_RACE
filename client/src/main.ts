@@ -1,31 +1,14 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
-import { RaceScene, type PickupView, type PlayerView } from "./game.js";
-import { BASE_SPEED, ROUTE_LENGTH } from "./track.js";
+import { RaceScene } from "./game.js";
+import {
+  BOOST_SPEED, IDLE_INPUT, ITEM_NAMES, createPlayer, createRaceState, prepareRace, resetToLobby, stepRace,
+  type KartInput, type PlayerState, type RaceEvent, type RaceObject, type RaceState,
+} from "./race.js";
+import { BASE_SPEED } from "./track.js";
 import "./style.css";
-
-interface PlayerState extends PlayerView {
-  boostRemaining: number;
-}
-
-interface RaceState {
-  players: Map<string, PlayerState>;
-  pickups: Map<string, PickupView>;
-  hostId: string;
-  phase: string;
-  countdown: number;
-  elapsed: number;
-  laps: number;
-}
 
 interface RaceResult {
   players: Array<{ name: string; place: number; finished: boolean; finishTime: number }>;
-}
-
-interface InputState {
-  throttle: boolean;
-  brake: boolean;
-  steer: -1 | 0 | 1;
-  useItem: boolean;
 }
 
 interface PeerConnection {
@@ -34,7 +17,7 @@ interface PeerConnection {
 }
 
 type PeerMessage =
-  | { type: "input"; input: InputState }
+  | { type: "input"; input: KartInput }
   | { type: "start" }
   | { type: "returnToLobby" }
   | { type: "state"; state: SerializedRaceState }
@@ -44,18 +27,14 @@ type PeerMessage =
   | { type: "results"; result: RaceResult }
   | { type: "hello"; player: PlayerState };
 
-interface SerializedRaceState {
+interface SerializedRaceState extends Omit<RaceState, "players" | "objects"> {
   players: Array<[string, PlayerState]>;
-  pickups: Array<[string, PickupView]>;
-  hostId: string;
-  phase: string;
-  countdown: number;
-  elapsed: number;
-  laps: number;
+  objects: Array<[string, RaceObject]>;
 }
 
 const MAX_RACERS = 4;
 const MAX_SPECTATORS = 8;
+const SIMULATION_HZ = 30;
 const KART_COLORS: Record<string, string> = {
   lime: "#d7f36a",
   clay: "#f28d60",
@@ -97,6 +76,7 @@ const resultList = byId<HTMLOListElement>("result-list");
 const returnButton = byId<HTMLButtonElement>("return-button");
 const lapElement = byId<HTMLElement>("lap");
 const raceStatus = byId<HTMLElement>("race-status");
+const itemSlot = byId<HTMLElement>("item-slot");
 const speedLabel = byId<HTMLElement>("speed");
 const speedFill = byId<HTMLElement>("speed-fill");
 const toast = byId<HTMLElement>("toast");
@@ -104,20 +84,18 @@ let game: RaceScene | null = null;
 let localSessionId = "";
 let hostMode = false;
 let isHost = false;
+let soloMode = false;
 let peerClient: PeerClient | null = null;
 let inputTimer = 0;
 let simulationTimer = 0;
 let toastTimer = 0;
-let soloTimer = 0;
-let soloLastTick = 0;
-let soloCountdownLeft = 0;
-let soloBoostRemaining = 0;
-let soloMode = false;
 let raceState: RaceState | null = null;
 let peer: PeerConnection | null = null;
 const peers = new Map<string, PeerConnection>();
-const playerInputs = new Map<string, InputState>();
+const playerInputs = new Map<string, KartInput>();
 const heldKeys = new Set<string>();
+// Et kort tryk på mellemrum kan falde mellem to simuleringsskridt; derfor huskes det, til det er læst.
+let itemPressed = false;
 
 const joinedRoomFromUrl = new URLSearchParams(window.location.search).get("room");
 if (joinedRoomFromUrl) roomIdInput.value = joinedRoomFromUrl;
@@ -138,32 +116,30 @@ function safeName(): string {
 }
 
 function makePlayer(name: string, role: "racer" | "spectator", kartStyle: string): PlayerState {
+  return createPlayer(name, role, role === "racer" ? KART_COLORS[kartStyle] ?? KART_COLORS.lime : "#b7c0ba");
+}
+
+function readInput(): KartInput {
   return {
-    name,
-    role,
-    color: role === "racer" ? KART_COLORS[kartStyle] ?? KART_COLORS.lime : "#b7c0ba",
-    progress: 0,
-    speed: 0,
-    lane: 0,
-    lap: 0,
-    place: 0,
-    finished: false,
-    finishTime: 0,
-    host: false,
-    hasItem: false,
-    boostRemaining: 0,
+    throttle: heldKeys.has("KeyW") || heldKeys.has("ArrowUp"),
+    brake: heldKeys.has("KeyS") || heldKeys.has("ArrowDown"),
+    steer: heldKeys.has("KeyA") || heldKeys.has("ArrowLeft") ? -1 : heldKeys.has("KeyD") || heldKeys.has("ArrowRight") ? 1 : 0,
+    drift: heldKeys.has("ShiftLeft") || heldKeys.has("ShiftRight"),
+    useItem: heldKeys.has("Space") || itemPressed,
   };
+}
+
+function takeInput(): KartInput {
+  const input = readInput();
+  itemPressed = false;
+  return input;
 }
 
 function serializeState(state: RaceState): SerializedRaceState {
   return {
+    ...state,
     players: [...state.players.entries()].map(([id, player]) => [id, { ...player }]),
-    pickups: [...state.pickups.entries()].map(([id, pickup]) => [id, { ...pickup }]),
-    hostId: state.hostId,
-    phase: state.phase,
-    countdown: state.countdown,
-    elapsed: state.elapsed,
-    laps: state.laps,
+    objects: [...state.objects.entries()].map(([id, object]) => [id, { ...object }]),
   };
 }
 
@@ -171,7 +147,7 @@ function deserializeState(state: SerializedRaceState): RaceState {
   return {
     ...state,
     players: new Map(state.players),
-    pickups: new Map(state.pickups),
+    objects: new Map(state.objects),
   };
 }
 
@@ -186,9 +162,9 @@ function renderState(state: RaceState): void {
   if (!raceState && !soloMode) return;
   const players = [...state.players.entries()];
   const racers = players.filter(([, player]) => player.role === "racer");
-  const spectators = players.filter(([, player]) => player.role === "spectator");
   const isLocalHost = localSessionId === state.hostId;
   const me = state.players.get(localSessionId);
+  const racing = me?.role === "racer";
 
   playersList.replaceChildren();
   for (const [id, player] of players) {
@@ -212,46 +188,51 @@ function renderState(state: RaceState): void {
     raceHud.classList.add("hidden");
     if (hostMode) syncLobby(state);
     else if (!soloMode) lobbyStatus.textContent = "Forbundet med værten. Venter på, at løbet starter.";
-  } else {
-    lobby.classList.add("hidden");
-    raceHud.classList.remove("hidden");
-    game?.updatePlayers(players);
-    game?.updatePickups(state.pickups.entries());
-    lapElement.textContent = me?.role === "spectator" ? "LIVE" : `${me?.lap ?? 0} / ${state.laps}`;
-    speedLabel.textContent = me?.role === "spectator" ? "—" : `${Math.round((me?.speed ?? 0) * 100)}`;
-    speedFill.style.width = `${Math.min(100, ((me?.speed ?? 0) / 1.35) * 100)}%`;
-    if (state.phase === "countdown") {
-      raceStatus.textContent = racers.length === 1 ? `TIDSKØRSEL · STARTER OM ${state.countdown}` : `STARTER OM ${state.countdown}`;
-    } else if (state.phase === "racing") {
-      const status = me?.hasItem ? "CAMPUS-PULS KLAR · MELLEMRUM" : "LØBET ER I GANG";
-      raceStatus.textContent = racers.length === 1 ? `TIDSKØRSEL · ${status}` : status;
-    } else {
-      raceStatus.textContent = racers.length === 1 ? "TIDSKØRSEL · LØBET ER SLUT" : "LØBET ER SLUT";
-    }
-    renderStandings(players);
+    return;
   }
+
+  lobby.classList.add("hidden");
+  raceHud.classList.remove("hidden");
+  game?.updatePlayers(players, localSessionId);
+  game?.updateObjects(state.objects.entries());
+  lapElement.textContent = racing && me ? `${me.lap} / ${state.laps}` : "LIVE";
+  const speed = Math.max(0, me?.speed ?? 0);
+  speedLabel.textContent = racing ? `${Math.round((speed / BASE_SPEED) * 100)}` : "—";
+  speedFill.style.width = `${Math.min(100, (speed / BOOST_SPEED) * 100)}%`;
+  itemSlot.classList.toggle("hidden", !racing || !me?.item);
+  if (me?.item) itemSlot.textContent = `${ITEM_NAMES[me.item]}${me.itemCount > 1 ? ` ×${me.itemCount}` : ""} · MELLEMRUM`;
+
+  const prefix = state.timeTrial ? "TIDSKØRSEL · " : "";
+  if (state.phase === "countdown") {
+    raceStatus.textContent = `${prefix}STARTER OM ${Math.ceil(state.countdown)}`;
+  } else if (state.phase === "racing") {
+    let status = state.timeTrial ? `${state.elapsed.toFixed(1)} s` : `${me?.place ?? "–"}. PLADS`;
+    if (me?.finished) status = "I MÅL";
+    else if (me?.respawn) status = "SÆTTES TILBAGE PÅ BANEN";
+    else if (me?.wrongWay) status = "⟲ FORKERT VEJ";
+    else if (me?.offroad) status += " · I GRÆSSET";
+    raceStatus.textContent = `${prefix}${status}`;
+  } else {
+    raceStatus.textContent = `${prefix}LØBET ER SLUT`;
+  }
+  raceStatus.classList.toggle("warning", state.phase === "racing" && Boolean(me?.wrongWay && !me.finished));
+  renderStandings(racers);
 }
 
-function renderStandings(players: Array<[string, PlayerState]>): void {
-  const racers = players
-    .filter(([, player]) => player.role === "racer")
-    .sort(([, a], [, b]) => {
-      if (a.finished !== b.finished) return a.finished ? -1 : 1;
-      if (a.finished && b.finished) return a.finishTime - b.finishTime;
-      return b.progress - a.progress;
-    });
+function renderStandings(racers: Array<[string, PlayerState]>): void {
+  const sorted = [...racers].sort(([, a], [, b]) => (a.place || 99) - (b.place || 99));
   standings.replaceChildren();
-  racers.forEach(([id, player], index) => {
+  sorted.forEach(([id, player], index) => {
     const row = document.createElement("div");
     row.className = "standing";
     const name = document.createElement("span");
     name.textContent = `${player.place || index + 1}. ${player.name}${id === localSessionId ? " (dig)" : ""}`;
     const distance = document.createElement("small");
-    distance.textContent = player.finished ? "MÅL" : `${Math.floor(player.progress * 100)}%`;
+    distance.textContent = player.finished ? "MÅL" : `OMG. ${player.lap}`;
     row.append(name, distance);
     standings.appendChild(row);
   });
-  if (!racers.length) {
+  if (!sorted.length) {
     const row = document.createElement("div");
     row.className = "standing";
     row.textContent = "Følger løbet live";
@@ -284,9 +265,18 @@ function broadcast(message: PeerMessage): void {
 
 function publishState(): void {
   if (!raceState || !isHost) return;
-  const snapshot = serializeState(raceState);
-  broadcast({ type: "state", state: snapshot });
+  if (peers.size) broadcast({ type: "state", state: serializeState(raceState) });
   renderState(raceState);
+}
+
+function deliverEvents(events: RaceEvent[]): void {
+  for (const event of events) {
+    if (event.playerId === localSessionId) showToast(event.message);
+    else {
+      const recipient = peers.get(event.playerId);
+      if (recipient) sendToPeer(recipient, { type: "toast", message: event.message });
+    }
+  }
 }
 
 function removePlayer(playerId: string): void {
@@ -328,18 +318,20 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
         player.color = message.player.color;
       }
       raceState.players.set(source.playerId, player);
-      playerInputs.set(source.playerId, { throttle: false, brake: false, steer: 0, useItem: false });
+      playerInputs.set(source.playerId, { ...IDLE_INPUT });
       sendToPeer(source, { type: "welcome", playerId: source.playerId });
       publishState();
       return;
     }
     if (message.type === "input") {
-      if (raceState.players.get(source.playerId)?.role === "racer" && raceState.phase === "racing") {
+      const phase = raceState.phase;
+      if (raceState.players.get(source.playerId)?.role === "racer" && (phase === "racing" || phase === "countdown")) {
         const input = message.input;
         playerInputs.set(source.playerId, {
           throttle: input?.throttle === true,
           brake: input?.brake === true,
           steer: input?.steer === -1 || input?.steer === 1 ? input.steer : 0,
+          drift: input?.drift === true,
           useItem: input?.useItem === true,
         });
       }
@@ -417,26 +409,16 @@ function createRoom(): void {
   peerClient = new PeerClient({ config: RTC_CONFIGURATION });
   peerClient.on("open", (id) => {
     localSessionId = id;
-    raceState = {
-      players: new Map(),
-      pickups: new Map(),
-      hostId: localSessionId,
-      phase: "lobby",
-      countdown: 0,
-      elapsed: 0,
-      laps: 3,
-    };
+    raceState = createRaceState(localSessionId);
     const player = makePlayer(name, "racer", kartStyleInput.value);
     player.host = true;
     raceState.players.set(localSessionId, player);
-    playerInputs.set(localSessionId, { throttle: false, brake: false, steer: 0, useItem: false });
     const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(id)}`;
     inviteLink.textContent = url;
     inviteLink.setAttribute("href", url);
     showLobby();
     game = new RaceScene(document.body, localSessionId);
     renderState(raceState);
-    startInputUpdates();
   });
   peerClient.on("connection", (channel) => {
     const target: PeerConnection = { channel, playerId: channel.peer };
@@ -471,15 +453,7 @@ function joinRoom(): void {
   isHost = false;
   hostMode = false;
   const role = roleInput.value === "spectator" ? "spectator" : "racer";
-  raceState = {
-    players: new Map(),
-    pickups: new Map(),
-    hostId: roomId,
-    phase: "lobby",
-    countdown: 0,
-    elapsed: 0,
-    laps: 3,
-  };
+  raceState = createRaceState(roomId);
   showError("");
   lobbyStatus.textContent = "Forbinder til lobbyen …";
   showLobby();
@@ -508,57 +482,34 @@ function joinRoom(): void {
   });
 }
 
+// Gæster sender deres taster til værten; værten læser sine egne direkte i updateRace.
 function startInputUpdates(): void {
   window.clearInterval(inputTimer);
   inputTimer = window.setInterval(() => {
-    if (!raceState || raceState.phase !== "racing") return;
-    const input: InputState = {
-      throttle: heldKeys.has("KeyW") || heldKeys.has("ArrowUp"),
-      brake: heldKeys.has("KeyS") || heldKeys.has("ArrowDown"),
-      steer: heldKeys.has("KeyA") || heldKeys.has("ArrowLeft") ? -1 : heldKeys.has("KeyD") || heldKeys.has("ArrowRight") ? 1 : 0,
-      useItem: heldKeys.has("Space"),
-    };
-    if (isHost) playerInputs.set(localSessionId, input);
-    else if (peer) sendToPeer(peer, { type: "input", input });
+    if (!raceState || !peer || (raceState.phase !== "racing" && raceState.phase !== "countdown")) return;
+    sendToPeer(peer, { type: "input", input: takeInput() });
   }, 50);
 }
 
 function startRace(): void {
   if (!raceState || !isHost || raceState.phase !== "lobby") return;
-  raceState.phase = "countdown";
-  raceState.countdown = 3;
-  raceState.elapsed = 0;
-  raceState.pickups.clear();
-  for (let lap = 0; lap < raceState.laps; lap++) {
-    for (const [index, fraction] of [0.14, 0.47, 0.81].entries()) {
-      const id = `pulse-${lap}-${fraction}`;
-      raceState.pickups.set(id, {
-        id,
-        progress: lap + fraction,
-        lane: [-0.65, 0.65, 0][(lap + index) % 3],
-        active: true,
-      });
-    }
-  }
-  simulationTimer = window.setInterval(updateRace, 1000 / 30);
+  prepareRace(raceState);
+  for (const [id, player] of raceState.players) if (player.role === "racer") playerInputs.set(id, { ...IDLE_INPUT });
+  resultsPanel.classList.add("hidden");
+  window.clearInterval(simulationTimer);
+  simulationTimer = window.setInterval(updateRace, 1000 / SIMULATION_HZ);
   publishState();
 }
 
 function finishRace(): void {
   if (!raceState) return;
   raceState.phase = "results";
-  const racers = [...raceState.players.entries()].filter(([, player]) => player.role === "racer");
-  racers.sort(([, a], [, b]) => {
-    if (a.finished !== b.finished) return a.finished ? -1 : 1;
-    if (a.finished) return a.finishTime - b.finishTime;
-    return b.progress - a.progress;
-  });
-  racers.forEach(([, player], index) => {
-    player.place = index + 1;
-    player.speed = 0;
-  });
+  const racers = [...raceState.players.values()]
+    .filter((player) => player.role === "racer")
+    .sort((a, b) => a.place - b.place);
+  for (const player of racers) player.speed = 0;
   const result = {
-    players: racers.map(([, player]) => ({
+    players: racers.map((player) => ({
       name: player.name,
       place: player.place,
       finished: player.finished,
@@ -574,91 +525,21 @@ function finishRace(): void {
 function updateRace(): void {
   const state = raceState;
   if (!state || !isHost) return;
-  const dt = 1 / 30;
-  if (state.phase === "countdown") {
-    state.countdown = Math.max(0, state.countdown - dt);
-    if (state.countdown <= 0) {
-      state.phase = "racing";
-      state.countdown = 0;
-    }
-    publishState();
-    return;
-  }
-  if (state.phase !== "racing") return;
-  state.elapsed += dt;
-  const racers = [...state.players.entries()].filter(([, player]) => player.role === "racer");
-  for (const [id, player] of racers) {
-    if (player.finished) continue;
-    const input = playerInputs.get(id);
-    if (!input) continue;
-    let boostRemaining = player.boostRemaining;
-    if (input.useItem && player.hasItem) {
-      player.hasItem = false;
-      boostRemaining = 2.5;
-    }
-    const boost = boostRemaining > 0;
-    boostRemaining = Math.max(0, boostRemaining - dt);
-    player.boostRemaining = boostRemaining;
-    const targetSpeed = input.brake ? 0 : input.throttle ? (boost ? 1.35 : 1) : 0;
-    const acceleration = input.throttle || input.brake ? 2.4 : 0.55;
-    player.speed += Math.max(-acceleration * dt, Math.min(acceleration * dt, targetSpeed - player.speed));
-    player.speed = Math.max(0, Math.min(1.35, player.speed));
-    player.lane = Math.max(-1, Math.min(1, player.lane + input.steer * dt * 0.85));
-    const previousProgress = player.progress;
-    player.progress += (BASE_SPEED / ROUTE_LENGTH) * player.speed * dt;
-    player.lap = Math.min(state.laps, Math.floor(player.progress));
-    state.pickups.forEach((pickup) => {
-      if (!player.hasItem && pickup.active && Math.abs(player.lane - pickup.lane) <= 0.45 &&
-        pickup.progress >= previousProgress && pickup.progress <= player.progress) {
-        pickup.active = false;
-        player.hasItem = true;
-        const message = "Campus-puls samlet op! Tryk mellemrum for et fartboost.";
-        if (id === localSessionId) showToast(message);
-        else {
-          const recipient = peers.get(id);
-          if (recipient) sendToPeer(recipient, { type: "toast", message });
-        }
-      }
-    });
-    if (player.progress >= state.laps) {
-      player.progress = state.laps;
-      player.lap = state.laps;
-      player.speed = 0;
-      player.finished = true;
-      player.finishTime = state.elapsed;
-      player.place = racers.filter(([, other]) => other.finished).length;
-    }
-  }
-  if (state.elapsed >= 180 || racers.every(([, player]) => player.finished)) finishRace();
-  publishState();
+  if (state.players.get(localSessionId)?.role === "racer") playerInputs.set(localSessionId, takeInput());
+  const { events, done } = stepRace(state, playerInputs, 1 / SIMULATION_HZ);
+  deliverEvents(events);
+  if (done) finishRace();
+  else publishState();
 }
 
 function returnToLobby(): void {
   if (!raceState || !isHost || raceState.phase !== "results") return;
-  raceState.phase = "lobby";
-  raceState.elapsed = 0;
-  raceState.countdown = 0;
-  raceState.pickups.clear();
-  let gridPosition = 0;
-  raceState.players.forEach((player, id) => {
-    player.speed = 0;
-    player.lane = 0;
-    player.lap = 0;
-    player.place = 0;
-    player.finished = false;
-    player.finishTime = 0;
-    player.hasItem = false;
-    player.boostRemaining = 0;
-    if (player.role === "racer") {
-      player.progress = gridPosition * 0.012;
-      gridPosition++;
-      playerInputs.set(id, { throttle: false, brake: false, steer: 0, useItem: false });
-    } else player.progress = 0;
-  });
+  resetToLobby(raceState);
   resultsPanel.classList.add("hidden");
   publishState();
 }
 
+// Solo er en tidskørsel: samme simulering som værten, bare uden netværk.
 function startSoloTimeTrial(): void {
   const name = safeName();
   if (!name) {
@@ -668,85 +549,16 @@ function startSoloTimeTrial(): void {
   }
   resetSession();
   soloMode = true;
+  isHost = true;
   localSessionId = "solo-player";
-  soloCountdownLeft = 3;
-  soloBoostRemaining = 0;
-  raceState = {
-    players: new Map([[localSessionId, { ...makePlayer(name, "racer", kartStyleInput.value), host: true, place: 1 }]]),
-    pickups: new Map(),
-    hostId: localSessionId,
-    phase: "countdown",
-    countdown: 3,
-    elapsed: 0,
-    laps: 3,
-  };
-  for (let lap = 0; lap < raceState.laps; lap++) {
-    for (const [index, fraction] of [0.14, 0.47, 0.81].entries()) {
-      const id = `pulse-${lap}-${fraction}`;
-      raceState.pickups.set(id, { id, progress: lap + fraction, lane: [-0.65, 0.65, 0][(lap + index) % 3], active: true });
-    }
-  }
+  raceState = createRaceState(localSessionId);
+  raceState.players.set(localSessionId, { ...makePlayer(name, "racer", kartStyleInput.value), host: true });
   showError("");
   showLobby();
   lobby.classList.add("hidden");
   raceHud.classList.remove("hidden");
   game = new RaceScene(document.body, localSessionId);
-  renderState(raceState);
-  soloLastTick = performance.now();
-  soloTimer = window.setInterval(updateSoloTimeTrial, 1000 / 30);
-}
-
-function updateSoloTimeTrial(): void {
-  const state = raceState;
-  const player = state?.players.get(localSessionId);
-  if (!state || !player) return;
-  const now = performance.now();
-  const dt = Math.min((now - soloLastTick) / 1000, 0.1);
-  soloLastTick = now;
-  if (state.phase === "countdown") {
-    soloCountdownLeft -= dt;
-    state.countdown = Math.max(0, Math.ceil(soloCountdownLeft));
-    if (soloCountdownLeft <= 0) state.phase = "racing";
-    renderState(state);
-    return;
-  }
-  if (state.phase !== "racing" || player.finished) return;
-  state.elapsed += dt;
-  if (heldKeys.has("Space") && player.hasItem) {
-    player.hasItem = false;
-    soloBoostRemaining = 2.5;
-  }
-  const boost = soloBoostRemaining > 0;
-  soloBoostRemaining = Math.max(0, soloBoostRemaining - dt);
-  const throttle = heldKeys.has("KeyW") || heldKeys.has("ArrowUp");
-  const brake = heldKeys.has("KeyS") || heldKeys.has("ArrowDown");
-  const steer = heldKeys.has("KeyA") || heldKeys.has("ArrowLeft") ? -1 : heldKeys.has("KeyD") || heldKeys.has("ArrowRight") ? 1 : 0;
-  const targetSpeed = brake ? 0 : throttle ? (boost ? 1.35 : 1) : 0;
-  const acceleration = throttle || brake ? 2.4 : 0.55;
-  player.speed = Math.max(0, Math.min(1.35, player.speed + Math.max(-acceleration * dt, Math.min(acceleration * dt, targetSpeed - player.speed))));
-  player.lane = Math.max(-1, Math.min(1, player.lane + steer * dt * 0.85));
-  const previousProgress = player.progress;
-  player.progress += (BASE_SPEED / ROUTE_LENGTH) * player.speed * dt;
-  player.lap = Math.min(state.laps, Math.floor(player.progress));
-  state.pickups.forEach((pickup) => {
-    if (!player.hasItem && pickup.active && Math.abs(player.lane - pickup.lane) <= 0.45 &&
-      pickup.progress >= previousProgress && pickup.progress <= player.progress) {
-      pickup.active = false;
-      player.hasItem = true;
-      showToast("Campus-puls samlet op! Tryk mellemrum for et fartboost.");
-    }
-  });
-  if (player.progress >= state.laps || state.elapsed >= 180) {
-    player.progress = Math.min(player.progress, state.laps);
-    player.lap = Math.min(state.laps, Math.floor(player.progress));
-    player.speed = 0;
-    player.finished = player.progress >= state.laps;
-    player.finishTime = state.elapsed;
-    state.phase = "results";
-    window.clearInterval(soloTimer);
-    renderResults({ players: [{ name: player.name, place: 1, finished: player.finished, finishTime: player.finishTime }] });
-  }
-  renderState(state);
+  startRace();
 }
 
 function leaveSession(): void {
@@ -761,7 +573,6 @@ function leaveSession(): void {
 function resetSession(): void {
   window.clearInterval(inputTimer);
   window.clearInterval(simulationTimer);
-  window.clearInterval(soloTimer);
   heldKeys.clear();
   peerClient?.destroy();
   peerClient = null;
@@ -777,7 +588,6 @@ function resetSession(): void {
   soloMode = false;
   hostMode = false;
   isHost = false;
-  soloBoostRemaining = 0;
   inviteLink.textContent = "";
   inviteLink.removeAttribute("href");
 }
@@ -810,7 +620,11 @@ window.addEventListener("keydown", (event) => {
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) return;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
+  if (event.code === "Space" && !event.repeat) itemPressed = true;
   heldKeys.add(event.code);
 });
 window.addEventListener("keyup", (event) => heldKeys.delete(event.code));
 window.addEventListener("blur", () => heldKeys.clear());
+
+// Kun i udvikling: giver automatiske browsertests adgang til løbstilstanden.
+if (import.meta.env.DEV) Object.assign(window, { auRace: { state: () => raceState, me: () => localSessionId } });
