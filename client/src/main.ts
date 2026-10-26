@@ -64,6 +64,9 @@ const KART_COLORS: Record<string, string> = {
 const RTC_CONFIGURATION: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
+const CONNECT_TIMEOUT_MS = 15000;
+const CONNECTION_BLOCKED_MESSAGE =
+  "Kunne ikke oprette direkte forbindelse til værten. Netværket kan blokere peer-to-peer-trafik (fx eduroam, firmanetværk eller VPN). Prøv et andet netværk eller en telefon som hotspot, og tjek at værten stadig er online.";
 
 const byId = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -379,8 +382,14 @@ function configurePeer(target: PeerConnection, name?: string, role?: "racer" | "
     handlePeerMessage(target, data as PeerMessage);
   });
   channel.on("close", () => {
-    if (isHost) removePlayer(target.playerId);
-    else showToast("Forbindelsen til værten blev afbrudt.");
+    if (isHost) {
+      removePlayer(target.playerId);
+      return;
+    }
+    if (peer !== target) return;
+    const previousError = errorElement.textContent;
+    leaveSession();
+    showError(previousError || "Værten forlod løbet, eller forbindelsen blev afbrudt. Løbet kan ikke fortsætte uden værten.");
   });
   channel.on("error", () => showError("Forbindelsen til spilleren fejlede."));
 }
@@ -482,9 +491,19 @@ function joinRoom(): void {
     peer = target;
     configurePeer(target, name, role, kartStyleInput.value);
     startInputUpdates();
+    window.setTimeout(() => {
+      if (peer !== target || channel.open) return;
+      leaveSession();
+      showError(CONNECTION_BLOCKED_MESSAGE);
+    }, CONNECT_TIMEOUT_MS);
   });
   peerClient.on("error", (error) => {
-    showError(`Kunne ikke forbinde til lobbyen: ${error.message}`);
+    leaveSession();
+    showError(
+      error.type === "peer-unavailable"
+        ? "Lobbyen blev ikke fundet. Tjek linket, og at værten stadig er online."
+        : `Kunne ikke forbinde til lobbyen: ${error.message}`,
+    );
   });
 }
 

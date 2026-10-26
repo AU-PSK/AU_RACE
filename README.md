@@ -1,6 +1,6 @@
 # AU Race
 
-Et originalt browserbaseret 3D-gokartprototype inspireret af ruten gennem
+Et uofficielt, originalt browserbaseret 3D-gokartprototype inspireret af ruten gennem
 Universitetsparken. Spillet bruger ikke officielt AU-branding eller kopierer
 andre spils figurer, musik eller banedesign.
 
@@ -18,7 +18,7 @@ og multiplayer kan prøves uden at starte en spilsserver.
 
 ## Åbn spillet via en offentlig URL
 
-[Åbn AU Race](https://petersoegaard90.github.io/AU_RACE/) på GitHub Pages.
+[Åbn AU Race](https://au-psk.github.io/AU_RACE/) på GitHub Pages.
 Hvis linket ikke virker endnu, skal Pages først aktiveres under
 **Settings → Pages** med **GitHub Actions** som deployment source. Workflowet
 bygger og udgiver browserklienten.
