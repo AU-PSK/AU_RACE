@@ -36,6 +36,20 @@ og trykker **Deltag i løb**. Værten starter løbet og skal blive online.
 Kør med **W / ↑**, brems med **S / ↓**, skift bane med **A / D / ← / →**, og
 brug en samlet bonus med **Mellemrum**.
 
+## Bane og omgivelser
+
+Banen følger de virkelige veje: Bartholins Allé → Wilhelm Meyers Allé → Ole Worms
+Allé → Karl Verners Vej → Victor Albecks Vej → start (ca. 1,4 km, 1 spilenhed = 4 m).
+Veje, bygninger, skov, sø og Universitetsbækken kommer fra OpenStreetMap
+(© OpenStreetMap-bidragsydere, [ODbL](https://www.openstreetmap.org/copyright)) og
+ligger færdigbehandlet i [client/src/campus-data.ts](client/src/campus-data.ts).
+Banen er en spilfortolkning, ikke en køreguide til de virkelige veje. Genskab data med:
+
+```sh
+node tools/fetch-osm.mjs data
+node tools/build-campus.mjs data/roads.json data/area.json client/src/campus-data.ts
+```
+
 ## Prototypeomfang
 
 - Direkte WebRTC-dataforbindelser med værtsstyret løb, op til fire racere og

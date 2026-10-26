@@ -1,5 +1,6 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
 import { RaceScene, type PickupView, type PlayerView } from "./game.js";
+import { BASE_SPEED, ROUTE_LENGTH } from "./track.js";
 import "./style.css";
 
 interface PlayerState extends PlayerView {
@@ -604,7 +605,7 @@ function updateRace(): void {
     player.speed = Math.max(0, Math.min(1.35, player.speed));
     player.lane = Math.max(-1, Math.min(1, player.lane + input.steer * dt * 0.85));
     const previousProgress = player.progress;
-    player.progress += 0.06 * player.speed * dt;
+    player.progress += (BASE_SPEED / ROUTE_LENGTH) * player.speed * dt;
     player.lap = Math.min(state.laps, Math.floor(player.progress));
     state.pickups.forEach((pickup) => {
       if (!player.hasItem && pickup.active && Math.abs(player.lane - pickup.lane) <= 0.45 &&
@@ -725,7 +726,7 @@ function updateSoloTimeTrial(): void {
   player.speed = Math.max(0, Math.min(1.35, player.speed + Math.max(-acceleration * dt, Math.min(acceleration * dt, targetSpeed - player.speed))));
   player.lane = Math.max(-1, Math.min(1, player.lane + steer * dt * 0.85));
   const previousProgress = player.progress;
-  player.progress += 0.06 * player.speed * dt;
+  player.progress += (BASE_SPEED / ROUTE_LENGTH) * player.speed * dt;
   player.lap = Math.min(state.laps, Math.floor(player.progress));
   state.pickups.forEach((pickup) => {
     if (!player.hasItem && pickup.active && Math.abs(player.lane - pickup.lane) <= 0.45 &&

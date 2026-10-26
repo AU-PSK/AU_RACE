@@ -1,21 +1,18 @@
 import * as THREE from "three";
+import { campus } from "./campus-data.js";
 
-const points = [
-  new THREE.Vector3(0, 0, 38),
-  new THREE.Vector3(18, 0, 32),
-  new THREE.Vector3(29, 0, 18),
-  new THREE.Vector3(27, 0, 3),
-  new THREE.Vector3(17, 0, -11),
-  new THREE.Vector3(2, 0, -23),
-  new THREE.Vector3(-15, 0, -25),
-  new THREE.Vector3(-28, 0, -13),
-  new THREE.Vector3(-30, 0, 6),
-  new THREE.Vector3(-22, 0, 25),
-  new THREE.Vector3(-8, 0, 37),
-];
+// Banen følger Bartholins Allé, Wilhelm Meyers Allé, Ole Worms Allé, Karl Verners Vej og
+// Victor Albecks Vej (OpenStreetMap-data, se tools/build-campus.mjs). Start/mål ligger ved
+// nordenden af Bartholins Allé.
+const points: THREE.Vector3[] = [];
+for (let i = 0; i < campus.route.length; i += 2) points.push(new THREE.Vector3(campus.route[i], 0, campus.route[i + 1]));
 
-export const TRACK_WIDTH = 9;
+export const TRACK_WIDTH = 6;
 export const route = new THREE.CatmullRomCurve3(points, true, "centripetal");
+export const ROUTE_LENGTH = route.getLength();
+
+// Fart ved fuld gas i spilenheder pr. sekund; en omgang tager ROUTE_LENGTH / BASE_SPEED sekunder.
+export const BASE_SPEED = 14;
 
 export function trackPosition(progress: number, lane = 0): THREE.Vector3 {
   const t = ((progress % 1) + 1) % 1;

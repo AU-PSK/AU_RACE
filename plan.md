@@ -13,6 +13,8 @@ Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke of
 - Værtsstyret løb: værtens browser simulerer løbet og sender tilstanden til gæsterne. Der er ingen spilserver, så der er intet at drive eller betale for.
 - Rum: 2–4 racere og op til 8 tilskuere. Ingen konti; kaldenavne og resultater findes kun i rummet.
 
+- Bane og omgivelser er genereret fra OpenStreetMap (`tools/`), så rundstrækningen følger de virkelige veje og bygninger. Kortdata kræver kildeangivelse (ODbL).
+
 ## Kendte begrænsninger
 
 - Forsvinder værten, ender løbet for alle. Gæsterne får en tydelig besked og sendes tilbage til menuen; værten overdrages ikke.

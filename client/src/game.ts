@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { campus } from "./campus-data.js";
 import { route, TRACK_WIDTH, trackPosition } from "./track.js";
 
 export interface PlayerView {
@@ -39,14 +40,15 @@ export class RaceScene {
   private karts = new Map<string, KartMesh>();
   private pickupMeshes = new Map<string, THREE.Mesh>();
   private focusKart: THREE.Group | null = null;
+  private sun: THREE.DirectionalLight;
   private lastTime = 0;
   private running = true;
 
   constructor(private container: HTMLElement, private mySessionId: string) {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#a9c5c0");
-    this.scene.fog = new THREE.Fog("#a9c5c0", 75, 180);
-    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 240);
+    this.scene.fog = new THREE.Fog("#a9c5c0", 110, 280);
+    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 420);
     this.camera.position.set(0, 19, 28);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
@@ -59,6 +61,7 @@ export class RaceScene {
 
     this.scene.add(new THREE.HemisphereLight("#eef5da", "#58694d", 2.2));
     const sun = new THREE.DirectionalLight("#fff0d1", 3);
+    this.sun = sun;
     sun.position.set(-36, 56, 30);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -66,7 +69,8 @@ export class RaceScene {
     sun.shadow.camera.right = 70;
     sun.shadow.camera.top = 70;
     sun.shadow.camera.bottom = -70;
-    this.scene.add(sun);
+    sun.shadow.camera.far = 200;
+    this.scene.add(sun, sun.target);
     this.addWorld();
     window.addEventListener("resize", this.resize);
     this.renderer.setAnimationLoop(this.render);
@@ -92,7 +96,7 @@ export class RaceScene {
       const position = trackPosition(progress, data.lane);
       const tangent = route.getTangentAt(((progress % 1) + 1) % 1);
       kart.root.position.set(position.x, 0.12, position.z);
-      kart.root.rotation.y = Math.atan2(tangent.x, tangent.z);
+      kart.root.rotation.y = Math.atan2(-tangent.x, -tangent.z);
       for (const wheel of kart.wheels) wheel.rotation.x += data.speed * 0.22;
       if (!data.finished && data.progress > leaderProgress) {
         leader = kart;
@@ -165,7 +169,7 @@ export class RaceScene {
 
   private addWorld(): void {
     const grass = new THREE.Mesh(
-      new THREE.PlaneGeometry(230, 230),
+      new THREE.PlaneGeometry(900, 900),
       new THREE.MeshStandardMaterial({ color: "#81966b", roughness: 1 }),
     );
     grass.rotation.x = -Math.PI / 2;
@@ -174,8 +178,7 @@ export class RaceScene {
     this.scene.add(grass);
 
     this.addRoad();
-    this.addGarden();
-    this.addBuildingsAndTrees();
+    this.addCampus();
   }
 
   private addRoad(): void {
@@ -247,88 +250,154 @@ export class RaceScene {
     this.scene.add(line);
   }
 
-  private addGarden(): void {
-    const garden = new THREE.Mesh(
-      new THREE.CircleGeometry(13, 48),
-      new THREE.MeshStandardMaterial({ color: "#607650", roughness: 1 }),
-    );
-    garden.rotation.x = -Math.PI / 2;
-    garden.position.y = -0.12;
-    this.scene.add(garden);
+  // Bygninger, skov, parker, sø og bæk fra OpenStreetMap, så omgivelserne ligner Universitetsparken.
+  private addCampus(): void {
+    const toShape = (flat: readonly number[]): THREE.Shape => {
+      const shape = new THREE.Shape();
+      for (let i = 0; i < flat.length; i += 2) {
+        if (i === 0) shape.moveTo(flat[i], -flat[i + 1]);
+        else shape.lineTo(flat[i], -flat[i + 1]);
+      }
+      return shape;
+    };
+    const flatMesh = (flat: readonly number[], material: THREE.Material, y: number): void => {
+      const mesh = new THREE.Mesh(new THREE.ShapeGeometry(toShape(flat)), material);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = y;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    };
 
-    const paths = [
-      [new THREE.Vector3(-6, 0, 0), new THREE.Vector3(0, 0, 0), new THREE.Vector3(6, 0, 0)],
-      [new THREE.Vector3(0, 0, -6), new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 6)],
-    ];
-    for (const path of paths) {
-      const walk = new THREE.Mesh(
-        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), 20, 0.65, 6, false),
-        new THREE.MeshStandardMaterial({ color: "#c4b99d", roughness: 1 }),
-      );
-      walk.position.y = -0.03;
-      this.scene.add(walk);
+    const forestMaterial = new THREE.MeshStandardMaterial({ color: "#6b8559", roughness: 1 });
+    const parkMaterial = new THREE.MeshStandardMaterial({ color: "#8ba56b", roughness: 1 });
+    const pitchMaterial = new THREE.MeshStandardMaterial({ color: "#78a35c", roughness: 1 });
+    const waterMaterial = new THREE.MeshStandardMaterial({ color: "#6fa5b8", roughness: 0.25, metalness: 0.1 });
+    for (const polygon of campus.parks) flatMesh(polygon, parkMaterial, -0.13);
+    for (const polygon of campus.pitches) flatMesh(polygon, pitchMaterial, -0.12);
+    for (const polygon of campus.forests) flatMesh(polygon, forestMaterial, -0.11);
+    for (const polygon of campus.water) flatMesh(polygon, waterMaterial, -0.09);
+    for (const stream of campus.streams) {
+      const points: THREE.Vector3[] = [];
+      for (let i = 0; i < stream.length; i += 2) points.push(new THREE.Vector3(stream[i], 0, stream[i + 1]));
+      if (points.length < 2) continue;
+      const curve = new THREE.CatmullRomCurve3(points);
+      const ribbon = new THREE.Mesh(new THREE.TubeGeometry(curve, points.length * 4, 0.45, 4, false), waterMaterial);
+      // Fladtrykt og under vejen, så bækken løber under vejen i stedet for ovenpå.
+      ribbon.scale.y = 0.15;
+      ribbon.position.y = -0.07;
+      this.scene.add(ribbon);
     }
-    this.addTree(0, -1, 0.85);
-    this.addTree(2.2, 1, 0.7);
-    this.addTree(-2, 2, 0.72);
+
+    const roofMaterial = new THREE.MeshStandardMaterial({ color: "#7a5f4d", roughness: 0.8 });
+    const wallMaterials = ["#cdb98a", "#c4a77a", "#d2c4a0"].map(
+      (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.86 }),
+    );
+    campus.buildings.forEach((building, index) => {
+      const mesh = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(toShape(building.p), { depth: building.h, bevelEnabled: false }),
+        [roofMaterial, wallMaterials[index % wallMaterials.length]],
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+      if (building.n) {
+        let sumX = 0;
+        let sumZ = 0;
+        for (let i = 0; i < building.p.length; i += 2) {
+          sumX += building.p[i];
+          sumZ += building.p[i + 1];
+        }
+        const count = building.p.length / 2;
+        const label = this.createTextSprite(building.n, "#e9ecd9");
+        label.position.set(sumX / count, building.h + 2.2, sumZ / count);
+        this.scene.add(label);
+      }
+    });
+
+    this.addTrees();
   }
 
-  private addBuildingsAndTrees(): void {
-    const buildings = [
-      [-43, -34, 15, 12], [-5, -47, 21, 12], [40, -27, 15, 17],
-      [45, 22, 14, 18], [12, 47, 18, 12], [-44, 35, 16, 13],
-      [-48, 1, 12, 16], [1, -50, 13, 9],
-    ];
-    for (const [x, z, width, depth] of buildings) {
-      const building = new THREE.Mesh(
-        new THREE.BoxGeometry(width, 6.5, depth),
-        new THREE.MeshStandardMaterial({ color: "#c3bda7", roughness: 0.86 }),
-      );
-      building.position.set(x, 3.1, z);
-      building.castShadow = true;
-      building.receiveShadow = true;
-      this.scene.add(building);
-      const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(width + 0.8, 0.4, depth + 0.8),
-        new THREE.MeshStandardMaterial({ color: "#745b48", roughness: 0.8 }),
-      );
-      roof.position.set(x, 6.55, z);
-      roof.castShadow = true;
-      this.scene.add(roof);
-    }
-
+  // Træer spredes i skov og parker, men holdes væk fra banen. Instansering holder antallet af meshes nede.
+  private addTrees(): void {
     let seed = 4813;
     const random = () => {
       seed = (seed * 16807) % 2147483647;
       return (seed - 1) / 2147483646;
     };
-    for (let i = 0; i < 95; i++) {
-      const x = random() * 110 - 55;
-      const z = random() * 110 - 55;
-      const p = new THREE.Vector3(x, 0, z);
-      const trackDistance = Math.min(...Array.from({ length: 48 }, (_, j) =>
-        p.distanceTo(route.getPointAt(j / 48))));
-      if (trackDistance < 9 || (Math.abs(x) < 16 && Math.abs(z) < 16)) continue;
-      this.addTree(x, z, 0.65 + random() * 0.75);
-    }
+    const routePoints = route.getSpacedPoints(360);
+    const nearRoute = (x: number, z: number): boolean =>
+      routePoints.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 6.5 * 6.5);
+    const inside = (flat: readonly number[], x: number, z: number): boolean => {
+      let result = false;
+      for (let i = 0, j = flat.length - 2; i < flat.length; j = i, i += 2) {
+        const [xi, zi, xj, zj] = [flat[i], flat[i + 1], flat[j], flat[j + 1]];
+        if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) result = !result;
+      }
+      return result;
+    };
+
+    const trees: Array<[number, number, number]> = [];
+    const scatter = (polygons: ReadonlyArray<readonly number[]>, perUnit: number): void => {
+      for (const flat of polygons) {
+        const xs = flat.filter((_, i) => i % 2 === 0);
+        const zs = flat.filter((_, i) => i % 2 === 1);
+        const [minX, maxX, minZ, maxZ] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+        const attempts = Math.ceil((maxX - minX) * (maxZ - minZ) * perUnit);
+        for (let i = 0; i < attempts; i++) {
+          const x = minX + random() * (maxX - minX);
+          const z = minZ + random() * (maxZ - minZ);
+          if (inside(flat, x, z) && !nearRoute(x, z)) trees.push([x, z, 0.8 + random() * 0.9]);
+        }
+      }
+    };
+    scatter(campus.forests, 0.07);
+    scatter(campus.parks, 0.012);
+    if (!trees.length) return;
+
+    const trunks = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.16, 0.26, 2, 7),
+      new THREE.MeshStandardMaterial({ color: "#594a38", roughness: 1 }),
+      trees.length,
+    );
+    const crowns = new THREE.InstancedMesh(
+      new THREE.IcosahedronGeometry(1.1, 1),
+      new THREE.MeshStandardMaterial({ color: "#526a48", roughness: 1, flatShading: true }),
+      trees.length,
+    );
+    const matrix = new THREE.Matrix4();
+    trees.forEach(([x, z, scale], index) => {
+      matrix.makeScale(scale, scale, scale).setPosition(x, scale, z);
+      trunks.setMatrixAt(index, matrix);
+      matrix.makeScale(scale, scale, scale).setPosition(x, 2.5 * scale, z);
+      crowns.setMatrixAt(index, matrix);
+    });
+    trunks.castShadow = true;
+    crowns.castShadow = true;
+    this.scene.add(trunks, crowns);
   }
 
-  private addTree(x: number, z: number, scale: number): void {
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16 * scale, 0.26 * scale, 2 * scale, 7),
-      new THREE.MeshStandardMaterial({ color: "#594a38", roughness: 1 }),
+  private createTextSprite(text: string, color: string): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 96;
+    const context = canvas.getContext("2d");
+    if (context) {
+      context.fillStyle = "#101719b3";
+      context.beginPath();
+      context.roundRect(4, 4, 504, 88, 20);
+      context.fill();
+      context.fillStyle = color;
+      context.font = "600 42px Manrope, sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(text, 256, 50, 480);
+    }
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }),
     );
-    trunk.position.set(x, scale, z);
-    trunk.castShadow = true;
-    this.scene.add(trunk);
-
-    const crown = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(1.1 * scale, 1),
-      new THREE.MeshStandardMaterial({ color: "#526a48", roughness: 1, flatShading: true }),
-    );
-    crown.position.set(x, 2.5 * scale, z);
-    crown.castShadow = true;
-    this.scene.add(crown);
+    sprite.scale.set(7, 1.3, 1);
+    return sprite;
   }
 
   private createKart(color: string, name: string): KartMesh {
@@ -427,6 +496,9 @@ export class RaceScene {
       this.camera.position.lerp(target, 1 - Math.exp(-delta * 3));
       const look = focusKart.position.clone().addScaledVector(forward, 4).add(new THREE.Vector3(0, 1, 0));
       this.camera.lookAt(look);
+      // Skyggekortet følger kartet, så skyggerne er skarpe, uanset hvor på banen man er.
+      this.sun.target.position.copy(focusKart.position);
+      this.sun.position.copy(focusKart.position).add(new THREE.Vector3(-36, 56, 30));
     }
     this.renderer.render(this.scene, this.camera);
   };

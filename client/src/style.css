@@ -69,7 +69,8 @@ h3 { margin: 26px 0 10px; }
 }
 .player-role { color: var(--muted); font-size: 0.72rem; }
 #lobby > button:not(.text-button) { width: 100%; margin-top: 10px; }
-#race-hud { position: fixed; inset: 0; pointer-events: none; }
+body > canvas { position: fixed; inset: 0; z-index: 0; display: block; }
+#race-hud { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
 .hud-top {
   display: flex; justify-content: space-between; align-items: center;
   padding: 24px 28px; text-shadow: 0 2px 8px #000;
