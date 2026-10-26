@@ -13,46 +13,40 @@ npm install
 npm run dev
 ```
 
-Åbn Vite-adressen fra terminalen (normalt `http://localhost:5173`). Colyseus-
-serveren kører på `ws://localhost:2567`. Åbn adressen i flere browservinduer
-for at prøve multiplayer lokalt.
+Åbn Vite-adressen fra terminalen (normalt `http://localhost:5173`). Både solo
+og multiplayer kan prøves uden at starte en spilsserver.
 
 ## Åbn spillet via en offentlig URL
 
-Klienten kan hostes på GitHub Pages, så spillerne åbner et link i browseren,
-for eksempel `https://SUND-Okonomi.github.io/AU_RACE/`. Multiplayer-serveren
-kan ikke køre på GitHub Pages: den skal hostes separat hos en udbyder, der
-understøtter Node.js og WebSockets, og have en offentlig `wss://`-adresse.
+Klienten hostes på GitHub Pages, for eksempel
+`https://SUND-Okonomi.github.io/AU_RACE/`. GitHub Actions bygger og udgiver
+browserklienten uden serverkonfiguration. Under **Settings → Pages** skal
+deployment source være sat til **GitHub Actions**.
 
-1. Udgiv Colyseus-serveren fra mappen `server` hos en WebSocket-kompatibel
-   hostingudbyder. Serverens startkommando er `npm start`, og den lytter på
-   porten i miljøvariablen `PORT`.
-2. I GitHub-repositoriet: åbn **Settings → Secrets and variables → Actions →
-   Variables**, og opret variablen `VITE_GAME_SERVER_URL` med serverens adresse,
-   fx `wss://din-server.example.com`.
-3. Under **Settings → Pages** vælg **GitHub Actions** som deployment source.
-4. Push ændringer til `main` (eller kør workflowet manuelt under **Actions**).
-   Når workflowet er færdigt, åbn `https://SUND-Okonomi.github.io/AU_RACE/`.
-
-Workflowet bygger og udgiver browserklienten automatisk. Linket kan deles med
-andre; værten opretter et privat rum i spillet og deler rummets invitationslink.
-En offentlig spil-URL alene starter ikke serveren, så serveren skal være
-udgivet og tilgængelig først.
+Push ændringer til `main` (eller kør workflowet manuelt under **Actions**), og
+åbn Pages-linket, når workflowet er færdigt.
 
 ## Sådan spiller du
 
-Skriv et kaldenavn og vælg **Opret privat rum** for at være vært, eller indsæt
-et invitationslink/rumkode og vælg **Deltag i rum**. Vælg tilskuerrollen, hvis
-du kun vil følge et løb. En enkelt racer kan starte en tidskørsel alene; med
-flere racere starter værten et fælles løb.
+Skriv et kaldenavn og vælg **Spil solo på tid** for at køre alene uden server.
+For multiplayer vælg **Opret peer-to-peer-løb**. Værten laver en kode og sender
+den til en spiller; spilleren indsætter koden og sender sin svar-kode tilbage
+til værten. Værten indsætter svaret og laver derefter en ny invitationskode
+til hver ekstra spiller. Tilsluttede spillere vælger racer eller tilskuer før
+de opretter svar-koden. Værten starter løbet og skal blive i spillet.
 
 Kør med **W / ↑**, brems med **S / ↓**, skift bane med **A / D / ← / →**, og
 brug en samlet bonus med **Mellemrum**.
 
 ## Prototypeomfang
 
-- Private Colyseus-rum med vært, op til fire racere og otte tilskuere.
-- Three.js-scene i browseren og serverstyrede bevægelsesopdateringer.
+- Direkte WebRTC-dataforbindelser med værtsstyret løb, op til fire racere og
+  otte tilskuere.
+- Forbindelseskoder udveksles manuelt; der kræves ingen spilsserver eller
+  signaleringstjeneste, men værten skal være online under løbet.
+- En offentlig STUN-tjeneste bruges til at finde netværksruter. Der er ingen
+  TURN-relay; nogle netværk kan derfor forhindre direkte forbindelse.
+- Three.js-scene i browseren og værtsstyrede bevægelsesopdateringer.
 - Fire originale kosmetiske kartfarver uden forskel i styring.
 - Kaldenavne og resultater gemmes kun i rummet; ingen konti eller global
   rekordliste.

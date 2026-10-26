@@ -27,18 +27,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Verify game server URL
-        run: |
-          if [ -z "$VITE_GAME_SERVER_URL" ]; then
-            echo "Set the VITE_GAME_SERVER_URL repository variable before deploying."
-            exit 1
-          fi
-        env:
-          VITE_GAME_SERVER_URL: ${{ vars.VITE_GAME_SERVER_URL }}
       - name: Build client
         run: npm run build --workspace client
-        env:
-          VITE_GAME_SERVER_URL: ${{ vars.VITE_GAME_SERVER_URL }}
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact

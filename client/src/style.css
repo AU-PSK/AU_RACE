@@ -14,7 +14,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button {
   border: 0; border-radius: 8px; background: var(--lime); color: #17201b;
   font-weight: 800; padding: 14px 18px; cursor: pointer;
@@ -24,17 +24,18 @@ button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.
 button:disabled { cursor: not-allowed; opacity: 0.45; }
 button.secondary { background: #283536; color: var(--ink); border: 1px solid #465451; }
 button.text-button { background: transparent; color: var(--muted); padding: 10px 0; }
-input, select {
+input, select, textarea {
   width: 100%; padding: 12px 13px; border: 1px solid #465451; border-radius: 7px;
   background: #182224; color: var(--ink); outline: none;
 }
-input:focus, select:focus { border-color: var(--lime); }
+textarea { resize: vertical; overflow-wrap: anywhere; }
+input:focus, select:focus, textarea:focus { border-color: var(--lime); }
 label { margin: 14px 0 6px; font-size: 0.8rem; color: #c2cbc2; }
 
 #app { width: 100%; min-height: 100vh; }
 .panel {
   position: fixed; z-index: 2; top: 50%; left: 50%;
-  width: min(440px, calc(100vw - 32px)); padding: 32px;
+  width: min(440px, calc(100vw - 32px)); max-height: 92vh; overflow-y: auto; padding: 32px;
   transform: translate(-50%, -50%); background: var(--panel);
   border: 1px solid rgba(210, 230, 200, 0.2); border-radius: 14px;
   box-shadow: 0 24px 90px #0009; backdrop-filter: blur(14px);
@@ -57,18 +58,13 @@ h3 { margin: 26px 0 10px; }
 .join-divider { margin: 16px 0 2px; text-align: center; color: #85918b; font-size: 0.72rem; }
 .error { min-height: 1em; color: #ff9e8c !important; }
 .hidden { display: none !important; }
-.invite-row { display: flex; gap: 8px; align-items: center; margin-top: 18px; }
-.invite-row code {
-  overflow: hidden; flex: 1; padding: 12px; border-radius: 7px;
-  background: #101719; color: var(--lime); text-overflow: ellipsis; white-space: nowrap;
-}
 #players, #result-list { margin: 0; padding: 0; list-style: none; }
 #players li, #result-list li {
   display: flex; justify-content: space-between; padding: 9px 0;
   border-bottom: 1px solid #ffffff16; font-size: 0.9rem;
 }
 .player-role { color: var(--muted); font-size: 0.72rem; }
-#lobby > button:not(.text-button) { width: 100%; margin-top: 18px; }
+#lobby > button:not(.text-button) { width: 100%; margin-top: 10px; }
 #race-hud { position: fixed; inset: 0; pointer-events: none; }
 .hud-top {
   display: flex; justify-content: space-between; align-items: center;
