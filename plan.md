@@ -15,7 +15,9 @@ Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke of
 
 - Bane og omgivelser er genereret fra OpenStreetMap (`tools/`), så rundstrækningen følger de virkelige veje og bygninger. Kortdata kræver kildeangivelse (ODbL).
 
-- Kørslen er fri bevægelse (position, retning, fart) styret af vært-browseren: terrænkørsel, kollision med bygninger, træer og andre karts, drift med mini-turbo og tre bonustyper.
+- Kørslen er fri bevægelse (position, retning, fart) styret af vært-browseren: terrænkørsel, kollision med bygninger, træer og andre karts, drift med tre trin mini-turbo, boost-pads og tre bonustyper med roulette.
+- Computerkarts (`bots`) fylder startfeltet op til fire racere og køres af samme simulering som spillerne. De holdes tæt på de menneskelige spillere (rubber-banding).
+- Udseende: cartoon-look (toon-materialer, sorte konturer, rødhvide kantstriber, himmel med skyer, partikler), dynamisk kamera og en HUD i racerspilsstil med minimap. Lyde syntetiseres med Web Audio, så der ikke er lydfiler at licensere.
 
 ## Kendte begrænsninger
 
@@ -26,7 +28,7 @@ Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke of
 
 1. Test med to pc'er på AU-netværk og på tværs af netværk; vurdér om TURN er nødvendig.
 2. Afklar tilladelse til AU-navn/branding og fakultetsnavne, før spillet deles bredt på AU.
-3. Fakultetskarts, originale bonusser og endelig balance.
+3. Fakultetskarts, originale bonusser og endelig balance (omgangstid er ca. 18 s; vurdér antal omgange og fart ved test).
 4. Test i moderne pc-browsere.
 
 ## Beslutninger og hensyn
