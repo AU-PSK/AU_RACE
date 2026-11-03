@@ -3,9 +3,12 @@ import { campus } from "./campus-data.js";
 
 // Banen følger Bartholins Allé, Wilhelm Meyers Allé, Ole Worms Allé, Karl Verners Vej og
 // Victor Albecks Vej (OpenStreetMap-data, se tools/build-campus.mjs). Start/mål ligger ved
-// nordenden af Bartholins Allé.
+// nordenden af Bartholins Allé. Ruten er flad (y = 0): løb og kollisioner regnes kun i x/z, og
+// terrænets højde lægges på bagefter, når scenen tegnes (terrain.ts).
 const points: THREE.Vector3[] = [];
-for (let i = 0; i < campus.route.length; i += 2) points.push(new THREE.Vector3(campus.route[i], 0, campus.route[i + 1]));
+for (let i = 0; i < campus.route.length; i += 2) {
+  points.push(new THREE.Vector3(campus.route[i], 0, campus.route[i + 1]));
+}
 
 export const TRACK_WIDTH = 7.5;
 export const route = new THREE.CatmullRomCurve3(points, true, "centripetal");

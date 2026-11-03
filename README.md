@@ -62,6 +62,22 @@ node tools/fetch-osm.mjs data
 node tools/build-campus.mjs data/roads.json data/area.json client/src/campus-data.ts
 ```
 
+## Terræn og højdedata
+
+Terrænet bruger højdedata fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur, CC BY 4.0). `client/src/terrain-data.ts` indeholder et gitter à 4 m over campus (rute 34–48 m over havet, største stigning ca. 11 %). Uden data (`npm run terrain -- reset`) er verden flad.
+
+Datakilden er [Mapterhorn](https://mapterhorn.com), som udstiller DHM/Terræn som åbne fliser uden konto eller token. Det er et omprøvet mirror og ikke den officielle download. Ingen adgangsnøgler gemmes i repoet.
+
+1. `pip install`: `python -m pip install --target data/pylib pillow` (kun til at dekode WebP-fliserne).
+2. `npm run terrain -- fetch-tiles` henter zoom 17-fliser (ca. 0,33 m/px) for campus til `data/` (git-ignoreret).
+3. `npm run terrain -- build data/mapterhorn.json` omsætter dem til spillets koordinater og skriver `client/src/terrain-data.ts` (middelværdi pr. 4 m-celle). Rapporten viser rutens højdeprofil.
+4. Alternativt: officielle DHM/Terræn-GeoTIFF-fliser fra [Dataforsyningen](https://dataforsyningen.dk/) (kræver egen konto) kan bygges med `npm run terrain -- build data/<flise>.tif ... --vintage "<dataårgang>"`; `bounds` viser, hvilke fliser der skal bruges.
+5. `npm run terrain -- selftest` afprøver værktøjet, og `npm run terrain -- reset` fjerner højdedata igen.
+
+Højderne gengives uden overdrivelse, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og karts, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
+
+> Terrændata: Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), CC BY 4.0, <https://dataforsyningen.dk/>, leveret som åbne højdefliser af Mapterhorn (<https://mapterhorn.com>). Data er omprøvet og omsat til et grovere gitter i spillets koordinater. Kreditering skal stå adskilt fra OpenStreetMap-krediteringen. Private tokens må aldrig lægges i repositoriet eller klientkoden.
+
 ## Prototypeomfang
 
 - Direkte WebRTC-dataforbindelser med værtsstyret løb, op til fire racere og
