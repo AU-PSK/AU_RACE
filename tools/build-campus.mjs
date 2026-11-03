@@ -150,6 +150,9 @@ const source = `// Genereret af tools/build-campus.mjs. Ret ikke i hånden; kør
 // Kortdata © OpenStreetMap-bidragsydere (ODbL, https://www.openstreetmap.org/copyright).
 // 1 spilenhed = ${METERS_PER_UNIT} m; nord er -z. Polygoner og kurver er flade lister [x, z, x, z, …].
 export const METERS_PER_UNIT = ${METERS_PER_UNIT};
+// Kortets origo (x = 0, z = 0); bruges af tools/terrain-data.mjs til at lægge højdedata på samme koordinater.
+export const ORIGIN_LAT = ${lat0};
+export const ORIGIN_LON = ${lon0};
 export interface CampusBuilding {
   h: number;
   p: number[];

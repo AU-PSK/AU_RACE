@@ -2,6 +2,9 @@
 // Kortdata © OpenStreetMap-bidragsydere (ODbL, https://www.openstreetmap.org/copyright).
 // 1 spilenhed = 4 m; nord er -z. Polygoner og kurver er flade lister [x, z, x, z, …].
 export const METERS_PER_UNIT = 4;
+// Kortets origo (x = 0, z = 0); bruges af tools/terrain-data.mjs til at lægge højdedata på samme koordinater.
+export const ORIGIN_LAT = 56.16824015;
+export const ORIGIN_LON = 10.202401949999999;
 export interface CampusBuilding {
   h: number;
   p: number[];

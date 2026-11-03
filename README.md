@@ -62,6 +62,21 @@ node tools/fetch-osm.mjs data
 node tools/build-campus.mjs data/roads.json data/area.json client/src/campus-data.ts
 ```
 
+## Terræn og højdedata
+
+Terrænet er klargjort til rigtige højdedata fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur, CC BY 4.0). **Der er endnu ikke lagt rigtige højdedata ind:** uden dem er verden flad (`client/src/terrain-data.ts` er en pladsholder), så spillet aldrig viser højdeforskelle, som ikke findes i kilden.
+
+Sådan lægger du data ind (der hentes intet fra nettet, og ingen adgangsnøgler gemmes i repoet):
+
+1. `npm run terrain -- bounds` viser det nødvendige område i EPSG:25832 og de 1 km-fliser, der dækker banen.
+2. Download disse DHM/Terræn-GeoTIFF-fliser fra [Dataforsyningen](https://dataforsyningen.dk/) med din egen konto, og læg dem uden for repoet, fx i `data/` (mappen er ignoreret af git).
+3. `npm run terrain -- build data/<flise>.tif ... --vintage "<dataårgang>"` omsætter dem til spillets koordinater og skriver `client/src/terrain-data.ts` (gitter à 4 m, middelværdi pr. celle, højder i DVR90). Manglende data (NoData) giver en tydelig fejl, medmindre du angiver `--fill-missing`. Rapporten viser rutens højdeprofil, så den kan sammenholdes med kilden.
+4. `npm run terrain -- selftest` afprøver værktøjet (UTM-omregning, GeoTIFF-læsning, orientering, NoData), og `npm run terrain -- reset` fjerner højdedata igen.
+
+Højderne gengives uden overdrivelse, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og karts, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
+
+> Terrændata: Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), CC BY 4.0, <https://dataforsyningen.dk/>. Data er omsat til et grovere gitter i spillets koordinater. Kreditering skal stå adskilt fra OpenStreetMap-krediteringen. Private tokens må aldrig lægges i repositoriet eller klientkoden.
+
 ## Prototypeomfang
 
 - Direkte WebRTC-dataforbindelser med værtsstyret løb, op til fire racere og

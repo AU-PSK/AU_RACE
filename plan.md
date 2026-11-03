@@ -22,12 +22,98 @@ Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke of
 ## Kendte begrænsninger
 
 - Forsvinder værten, ender løbet for alle. Gæsterne får en tydelig besked og sendes tilbage til menuen; værten overdrages ikke.
-- Der er ingen TURN-relay, så direkte forbindelser kan fejle på nogle netværk (fx eduroam, firmanetværk, VPN). Gæsten får en fejlmeddelelse efter 15 sekunder med forslag om andet netværk eller hotspot. Tilføj en TURN-tjeneste, hvis fejl viser sig almindelige ved test på AU-nettet.
+- Der er ingen TURN-relay. Direkte forbindelser kan derfor fejle på netværk, hvor NAT eller firewall blokerer WebRTC-forbindelser (fx eduroam, firmanetværk eller VPN). Berørte gæster kan ikke deltage, før de prøver et andet netværk eller hotspot; spillet viser en fejlmeddelelse efter 15 sekunder. En TURN-tjeneste kan videresende trafikken og forbedre forbindelsesmuligheden, men kræver drift, konfiguration og medfører mulig trafik-/driftsomkostning. Det er endnu ikke besluttet, om TURN skal indføres; test på AU-netværk skal informere beslutningen.
+
+## Status og afklaringer
+
+Status ud fra planen; gennemførelse skal bekræftes ved test og implementering.
+
+- **Afklaret:** Prototypen er godkendt til internt brug. Bredere offentlig deling kræver fortsat særskilt afklaring af AU-navn, branding og fakultetsnavne.
+- **Kandidat identificeret, endnu ikke godkendt:** Danmarks Højdemodel, DHM/Terræn, er den foretrukne kandidat. [Produktbeskrivelsen](https://confluence.kds.dk/download/attachments/25722920/dhm-prodspec-v1.0.0.pdf?version=1&modificationDate=1742295701551&api=v2) angiver GeoTIFF, 32-bit float, 40 cm pixelstørrelse eller finere, ETRS89 / UTM zone 32N (EPSG:25832) og DVR90 (EPSG:5799). Dataforsyningens [officielle fildownload-API](https://api.dataforsyningen.dk/rest/fildownload/v1.0/openapi.json) kræver autentificering med token; en konkret download af DHM/Terræn-rasteret kræver derfor adgang via en bruger/session. Intet raster er hentet eller inspiceret endnu, så campus-pixeldækning, dataårgang og reproducerbar download er fortsat ubekræftet.
+- **Åben beslutning:** Det er ikke besluttet, om TURN skal bruges. Uden TURN kan gæster på visse netværk være ude af stand til at forbinde; afprøv direkte WebRTC på AU-netværket og på tværs af netværk, før beslutningen træffes.
+- **Planlagt, ikke dokumenteret som gennemført:** PR 1–3 for terræn samt multiplayer-, browser- og gameplaytest. Build- og spilletestresultater skal registreres, når arbejdet udføres.
+
+## Plan: Mere naturtro terræn
+
+### Mål
+
+Gør landskabet i AU Race mere naturtro ved at gengive Universitetsparkens faktiske højdeforskelle. Terræn, veje og omgivelser skal følge højdedataene, så verden ikke fremstår som en flad spilleplade med 3D-modeller placeret ovenpå. Behold spillets eksisterende 3D- og cartoon-stil; fokus er terrænets form og overgangen mellem terræn, veje og omgivelser, ikke fotorealistisk grafik.
+
+### Fakta om den nuværende codebase
+
+- Spillet bruger allerede en 3D-scene med 3D-modeller og kamera i `client/src/game.ts`.
+- Græsset er et stort fladt plan, og vej og kantsten tegnes i faste højder.
+- Banens rute har kun `x/z`-koordinater; punkterne oprettes med `y = 0` i `client/src/track.ts`.
+- `tools/build-campus.mjs` genererer campusgeometri fra OpenStreetMap-data. Den nuværende datagenerering indhenter ikke terrænhøjder.
+- Løbsbevægelse og kollisionsberegning foregår primært i `x/z`. En visuel terræntilpasning kan derfor i første omgang gennemføres uden at ændre løbets grundlæggende fysik eller multiplayerbeskeder.
+- Den eksisterende stil er bevidst stiliseret. Mere korrekte højdeforskelle kræver ikke fotorealistiske materialer, lys eller modeller.
+
+### Plan
+
+Arbejdet kan deles i følgende pull requests:
+
+#### PR 1 — Find og klargør højdedata
+
+1. Afprøv DHM/Terræn som foretrukken kilde ved at hente et lille numerisk rasterudsnit, der dækker campus og banen. Dataforsyningens officielle fildownload-API kræver en bearer-token eller brugertoken; brug en godkendt lokal konto/session og gem aldrig token i repoet, scripts, klientkode eller offentlige filer. Den dokumenterede [DHM-WMS](https://datafordeler.dk/dataoversigt/danmarks-hoejdemodel-dhm/dhm-wms/) kræver API-nøgle/OAuth og leverer renderede kortbilleder, ikke højdeværdier. Bekræft, at kontoen faktisk kan hente DHM/Terræn som GeoTIFF eller tilsvarende raster; den generelle fildownload-API dokumentation beviser ikke i sig selv, at dette konkrete rasterprodukt er tilgængeligt dér.
+2. Kontrollér det faktiske udtræks dækning, NoData-værdier, opløsning, lokal indsamlings-/dataårgang og metadata. Bekræft, at højderne er i DVR90, og at rasteret kan transformeres fra ETRS89 / UTM zone 32N (EPSG:25832) til spillets lokale koordinater uden akse- eller orienteringsfejl.
+3. Kontrollér licens og vilkår for det konkrete datasæt og adgangsvej. Dataforsyningens vilkår angiver CC BY 4.0 for Klimadatastyrelsens frie geografiske data; planlæg kreditering, licenslink og oplysning om ændringer. Hold DHM- og OSM-kreditering/licenser adskilt.
+4. Sammenhold prøveudsnittet med ruten, og kontrollér, at den udledte højdeprofil afspejler kildedataene.
+5. Når kilden er godkendt, udvid eller tilføj et reproducerbart dataflow i `tools/`, som henter/forbereder data og konverterer fra kildekoordinater til spillets lokale koordinater. Dokumentér kilde, CRS, højdedatum, enheder, dataårgang, udtræksområde og eventuel interpolation/omprøvetagning.
+6. Generér terrændata, og sørg for, at manglende eller ugyldige højdedata rapporteres tydeligt i stedet for stiltiende at blive erstattet af misvisende værdier.
+
+**Aktuel status og beslutningsport:** Rasteret er ikke hentet eller inspiceret, fordi den dokumenterede filadgang kræver autentificering, som ikke er tilgængelig i denne arbejdssession. PR 1 må først godkendes, når et numerisk rasterudsnit for campus er hentet via en godkendt adgang, dets metadata og licens er bekræftet, og udtræk/behandling kan gentages uden at eksponere legitimationsoplysninger. Hvis rasteradgang eller vilkår ikke kan bekræftes, stoppes PR 2, indtil kilden eller dataflowet er afklaret. DHM/Højdekurver med 0,25 m interval kan undersøges som en sekundær reserve, men er vektorkurver og ikke en direkte erstatning for DHM/Terræn-rasteret.
+
+**Udført uden rigtige data (værktøj og klient):** `tools/terrain-data.mjs` (`npm run terrain`) kan `bounds` (nødvendigt område og 1 km-fliser: N 6224–6226, E 574–575), `build` (GeoTIFF → `client/src/terrain-data.ts`, med NoData-kontrol, metadata og rapport over rutens højdeprofil), `selftest`, `synthetic` og `reset`. Kæden er afprøvet ende-til-ende med et kunstigt raster (kun til test; derefter nulstillet). Klienten (`terrain.ts`, `track.ts`, `game.ts`) bruger højdedata til terrænmesh, vej, kantsten, bygninger, træer, objekter, kamera og karts, og er flad uden data. Typecheck og build er grønne.
+
+**Mangler for at lukke PR 1:** Hent DHM/Terræn-fliserne med en godkendt konto, kør `npm run terrain -- build ... --vintage <år>`, kontrollér rutens højdeprofil mod kilden og bekræft dækning, vilkår og dataårgang (opdatér `TERRAIN_DATA_LICENSE.md`). Kør derefter spillet langs banen for at kontrollere terrænet visuelt (PR 3, punkt 4).
+
+#### PR 2 — Form terrænet efter højdedataene
+
+1. Indfør en fælles funktion, der slår terrænhøjden op ved en given `x/z`-position.
+2. Erstat det flade græsplan med et terrænmesh baseret på højdedataene.
+3. Interpolér højderne, så terrænet fremstår jævnt ved datakildens opløsning, uden at tilføje udokumenterede højdeforskelle.
+4. Tilpas mesh-opløsningen til datakildens detaljegrad og browserens ydelseskrav.
+5. Lad vej og kantsten følge terrænet, så de ikke flyder over det eller skærer igennem det.
+6. Tilpas synlige overgange ved vejkanter og andre terrænkanter, så overfladerne mødes naturligt.
+
+#### PR 3 — Tilpas omgivelser og kvalitetssikr resultatet
+
+1. Placér bygninger, træer og andre relevante objekter på terrænet.
+2. Kontrollér bygninger på skrånende terræn, så fundamenter ikke tydeligt svæver eller begraves.
+3. Lad karts følge terrænhøjden visuelt; tilføj kun visuel hældning, hvor terrænets hældning tilsiger det.
+4. Gennemgå scenen fra spillerens kamera langs banen, og ret synlige ujævnheder, overlap og terrænartefakter.
+5. Dokumentér højdedatakilden og dens kreditering i `README.md`.
+
+PR 1 skal bekræfte både dataegnethed og praktisk, reproducerbar adgang til campusdata med anvendelige vilkår, før PR 2 baseres på dem. PR 3 afhænger af PR 2.
+
+### Acceptkriterier
+
+- Højdedatakilde, licens, koordinatsystem og enheder er dokumenteret.
+- Et konkret campusudsnits dækning, dataårgang, NoData-håndtering og rastermetadata er kontrolleret.
+- Dataudtræk og konvertering kan gentages uden at eksponere private adgangsnøgler.
+- Terrænet gengiver højdeforskellene i kildedataene uden kunstig overdrivelse.
+- Terrænet fremstår jævnt ved datakildens opløsning uden tydelige trin eller tilfældige buler.
+- Vej og kantsten følger terrænets profil uden synlige huller, gennemskæringer eller svæven.
+- Bygninger, træer og karts er placeret i forhold til terrænets højde.
+- Terrændata kan genereres igen med projektets værktøjer, og manglende data rapporteres tydeligt.
+- Projektets build lykkes, og ændringen er kontrolleret i spillet langs ruten.
+- Løbsregler, grundlæggende kollision og multiplayerens beskedformat behøver ikke ændres.
+
+### Uden for scope
+
+- At gøre hele spillet fotorealistisk eller udskifte den eksisterende cartoon-stil.
+- At lade bakker påvirke fart, acceleration, bremsning, vejgreb eller drift.
+- At ændre banens rute, løbsregler eller spilbalance.
+- At indføre 3D-kollision, væltning, fald eller avanceret kartfysik.
+- At hente terrænhøjder dynamisk, mens spillet kører.
+- At modellere alle støttemure, trapper, bygningsdetaljer eller terrænforhold uden for spilleområdet.
+
+Den foreløbige kildekandidat er DHM/Terræn. Landsdækkende produktbeskrivelse sandsynliggør campusdækning, men rasteret er ikke hentet eller inspiceret. Den officielle fildownload-API kræver autentificering, og tilgængeligheden af netop DHM/Terræn som numerisk raster er ikke bekræftet. Faktisk pixel-dækning, dataårgang, reproducerbar raster-downloadvej og konkrete brugsvilkår skal godkendes i PR 1, før terrændata implementeres.
 
 ## Næste skridt
 
-1. Test med to pc'er på AU-netværk og på tværs af netværk; vurdér om TURN er nødvendig.
-2. Afklar tilladelse til AU-navn/branding og fakultetsnavne, før spillet deles bredt på AU.
+1. Test med to pc'er på AU-netværk og på tværs af netværk; registrér forbindelsesfejl og afgør derefter, om TURN er nødvendig.
+2. Brug prototypen internt som godkendt. Afklar særskilt tilladelse til AU-navn/branding og fakultetsnavne, før spillet deles bredt eller offentligt.
 3. Fakultetskarts, originale bonusser og endelig balance (omgangstid er ca. 18 s; vurdér antal omgange og fart ved test).
 4. Test i moderne pc-browsere.
 

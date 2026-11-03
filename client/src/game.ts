@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { campus } from "./campus-data.js";
 import { DRIFT_LEVELS, type PlayerState, type RaceObject } from "./race.js";
+import { terrainBounds, terrainFrame, terrainHeightAt, terrainStep } from "./terrain.js";
 import { BASE_SPEED, route, ROUTE_LENGTH, TRACK_WIDTH } from "./track.js";
 import { buildingColliders, pointInPolygon, trees } from "./world.js";
 
@@ -24,6 +25,8 @@ interface KartMesh {
   heading: number;
   slide: number;
   lean: number;
+  pitch: number;
+  roll: number;
 }
 
 interface Particle {
@@ -174,7 +177,7 @@ export class RaceScene {
       }
       // Store spring (genstart på banen) tages med det samme i stedet for at glide hen over græsset.
       if (Math.hypot(kart.root.position.x - data.x, kart.root.position.z - data.z) > 12) {
-        kart.root.position.set(data.x, 0.03, data.z);
+        kart.root.position.set(data.x, terrainHeightAt(data.x, data.z) + 0.03, data.z);
         kart.heading = data.heading;
       }
       kart.target = data;
@@ -222,6 +225,7 @@ export class RaceScene {
   private createObjectMesh(object: RaceObject): THREE.Group {
     const group = new THREE.Group();
     group.userData.kind = object.kind;
+    let lift = 0;
     if (object.kind === "box") {
       const cube = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), this.boxMaterial);
       const frame = new THREE.LineSegments(
@@ -229,16 +233,18 @@ export class RaceScene {
         new THREE.LineBasicMaterial({ color: "#ffffff" }),
       );
       group.add(cube, frame);
-      group.position.y = 1.4;
+      lift = 1.4;
     } else if (object.kind === "pad") {
+      const geometry = new THREE.PlaneGeometry(2.3, 3.6, 3, 4);
+      geometry.rotateX(-Math.PI / 2);
+      const base = this.drape(geometry, object.x, object.z, object.heading);
       const pad = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.3, 3.6),
+        geometry,
         new THREE.MeshBasicMaterial({ map: this.padTexture, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
       );
-      pad.rotation.x = -Math.PI / 2;
       group.add(pad);
       group.rotation.y = object.heading;
-      group.position.y = 0.1;
+      group.position.y = base + 0.1;
     } else if (object.kind === "paper") {
       const paper = this.toon("#fbf6e6");
       for (let i = 0; i < 4; i++) {
@@ -257,9 +263,29 @@ export class RaceScene {
       disc.castShadow = true;
       this.outline(disc, 1.1);
       group.add(disc, ring);
-      group.position.y = 0.9;
+      lift = 0.9;
+    }
+    if (object.kind !== "pad") {
+      group.userData.lift = lift;
+      group.position.y = lift + terrainHeightAt(object.x, object.z);
     }
     return group;
+  }
+
+  /** Lægger en vandret flade (i lokale koordinater om et punkt og en retning) ned over terrænet. Returnerer terrænets højde i midten. */
+  private drape(geometry: THREE.BufferGeometry, centerX: number, centerZ: number, heading: number): number {
+    const base = terrainHeightAt(centerX, centerZ);
+    const positions = geometry.attributes.position as THREE.BufferAttribute;
+    const cos = Math.cos(heading);
+    const sin = Math.sin(heading);
+    for (let i = 0; i < positions.count; i++) {
+      const lx = positions.getX(i);
+      const lz = positions.getZ(i);
+      positions.setY(i, terrainHeightAt(centerX + lx * cos + lz * sin, centerZ - lx * sin + lz * cos) - base);
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+    return base;
   }
 
   dispose(): void {
@@ -323,23 +349,104 @@ export class RaceScene {
       context.fillRect(0, 0, 64, 64);
       context.fillRect(64, 64, 64, 64);
     });
-    grassTexture.repeat.set(900 / 20, 900 / 20);
-    const grass = new THREE.Mesh(
-      new THREE.PlaneGeometry(900, 900),
-      new THREE.MeshLambertMaterial({ map: grassTexture }),
-    );
-    grass.rotation.x = -Math.PI / 2;
-    grass.position.y = -0.16;
-    grass.receiveShadow = true;
-    this.scene.add(grass);
+    grassTexture.repeat.set(2400 / 20, 2400 / 20);
+    // Omlandet uden for højdedataene: en flad plan lige under terrænets kant.
+    const outer = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshLambertMaterial({ map: grassTexture }));
+    outer.rotation.x = -Math.PI / 2;
+    outer.position.y = -0.12;
+    outer.receiveShadow = true;
+    this.scene.add(outer);
 
+    this.addTerrain();
     this.addRoad();
     this.addCampus();
   }
 
-  // Et bånd langs ruten fra sidelinje inner til outer. v løber langs banen, så teksturen gentages hver `period` enhed.
-  private ribbon(inner: number, outer: number, y: number, material: THREE.Material, period: number): THREE.Mesh {
+  // Terrænmeshet har samme gitter som højdedataene. Arealanvendelsen (græs, park, skov, vand) males i teksturen.
+  private addTerrain(): void {
+    const { minX, maxX, minZ, maxZ } = terrainBounds;
+    const width = maxX - minX;
+    const depth = maxZ - minZ;
+    const cols = Math.max(2, Math.ceil(width / terrainStep) + 1);
+    const rows = Math.max(2, Math.ceil(depth / terrainStep) + 1);
+    const positions = new Float32Array(cols * rows * 3);
+    const uvs = new Float32Array(cols * rows * 2);
+    for (let j = 0; j < rows; j++) {
+      const z = Math.min(maxZ, minZ + j * terrainStep);
+      for (let i = 0; i < cols; i++) {
+        const x = Math.min(maxX, minX + i * terrainStep);
+        const n = j * cols + i;
+        positions.set([x, terrainHeightAt(x, z), z], n * 3);
+        uvs.set([(x - minX) / width, 1 - (z - minZ) / depth], n * 2);
+      }
+    }
+    const indices: number[] = [];
+    for (let j = 0; j < rows - 1; j++) {
+      for (let i = 0; i < cols - 1; i++) {
+        const a = j * cols + i;
+        indices.push(a, a + cols, a + 1, a + 1, a + cols, a + cols + 1);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const pixelsPerUnit = Math.min(4, 2048 / Math.max(width, depth));
+    const landUse = canvasTexture(Math.ceil(width * pixelsPerUnit), Math.ceil(depth * pixelsPerUnit), (context) => {
+      const px = (x: number): number => (x - minX) * pixelsPerUnit;
+      const pz = (z: number): number => (z - minZ) * pixelsPerUnit;
+      const trace = (flat: readonly number[]): void => {
+        context.beginPath();
+        for (let i = 0; i < flat.length; i += 2) {
+          if (i === 0) context.moveTo(px(flat[i]), pz(flat[i + 1]));
+          else context.lineTo(px(flat[i]), pz(flat[i + 1]));
+        }
+      };
+      const fill = (color: string, polygons: readonly (readonly number[])[]): void => {
+        context.fillStyle = color;
+        for (const polygon of polygons) {
+          trace(polygon);
+          context.closePath();
+          context.fill();
+        }
+      };
+      const square = 10 * pixelsPerUnit;
+      context.fillStyle = "#79cf55";
+      context.fillRect(0, 0, width * pixelsPerUnit, depth * pixelsPerUnit);
+      context.fillStyle = "#6cc44a";
+      for (let gx = 0; gx * square < width * pixelsPerUnit; gx++) {
+        for (let gz = 0; gz * square < depth * pixelsPerUnit; gz++) {
+          if ((gx + gz) % 2 === 0) context.fillRect(gx * square, gz * square, square, square);
+        }
+      }
+      fill("#8fdb62", campus.parks);
+      fill("#5cc85a", campus.pitches);
+      fill("#4eb04a", campus.forests);
+      fill("#3fb7f2", campus.water);
+      context.strokeStyle = "#3fb7f2";
+      context.lineWidth = 0.9 * pixelsPerUnit;
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      for (const stream of campus.streams) {
+        trace(stream);
+        context.stroke();
+      }
+    });
+    landUse.wrapS = THREE.ClampToEdgeWrapping;
+    landUse.wrapT = THREE.ClampToEdgeWrapping;
+
+    const ground = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map: landUse }));
+    ground.position.y = -0.02;
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+  }
+
+  // Et bånd langs ruten fra sidelinje inner til outer, lagt ned over terrænet. v løber langs banen, så teksturen gentages hver `period` enhed.
+  private ribbon(inner: number, outer: number, lift: number, material: THREE.Material, period: number): THREE.Mesh {
     const segments = 480;
+    const across = 5;
     const repeats = Math.max(1, Math.round(ROUTE_LENGTH / period));
     const positions: number[] = [];
     const uvs: number[] = [];
@@ -349,14 +456,17 @@ export class RaceScene {
       const center = route.getPointAt(t);
       const tangent = route.getTangentAt(t);
       const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
-      for (const [offset, u] of [[inner, 0], [outer, 1]] as const) {
-        const edge = center.clone().addScaledVector(normal, offset);
-        positions.push(edge.x, y, edge.z);
+      for (let k = 0; k < across; k++) {
+        const u = k / (across - 1);
+        const edge = center.clone().addScaledVector(normal, inner + (outer - inner) * u);
+        positions.push(edge.x, terrainHeightAt(edge.x, edge.z) + lift, edge.z);
         uvs.push(u, t * repeats);
       }
       if (i < segments) {
-        const n = i * 2;
-        indices.push(n, n + 2, n + 1, n + 1, n + 2, n + 3);
+        for (let k = 0; k < across - 1; k++) {
+          const a = i * across + k;
+          indices.push(a, a + across, a + 1, a + 1, a + across, a + across + 1);
+        }
       }
     }
     const geometry = new THREE.BufferGeometry();
@@ -385,7 +495,7 @@ export class RaceScene {
       context.fillRect(62, 148, 4, 90);
     });
     asphalt.wrapS = THREE.ClampToEdgeWrapping;
-    const road = this.ribbon(-TRACK_WIDTH / 2, TRACK_WIDTH / 2, 0.03, new THREE.MeshLambertMaterial({ map: asphalt, side: THREE.DoubleSide }), 14);
+    const road = this.ribbon(-TRACK_WIDTH / 2, TRACK_WIDTH / 2, 0.03, new THREE.MeshLambertMaterial({ map: asphalt, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), 14);
     this.scene.add(road);
 
     const kerb = canvasTexture(16, 64, (context) => {
@@ -395,7 +505,7 @@ export class RaceScene {
       context.fillRect(0, 32, 16, 32);
     });
     kerb.wrapS = THREE.ClampToEdgeWrapping;
-    const kerbMaterial = new THREE.MeshLambertMaterial({ map: kerb, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    const kerbMaterial = new THREE.MeshLambertMaterial({ map: kerb, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     this.scene.add(
       this.ribbon(TRACK_WIDTH / 2, TRACK_WIDTH / 2 + 0.9, 0.05, kerbMaterial, 3.6),
       this.ribbon(-TRACK_WIDTH / 2 - 0.9, -TRACK_WIDTH / 2, 0.05, kerbMaterial, 3.6),
@@ -404,9 +514,9 @@ export class RaceScene {
     // Start/mål: tern på vejen og en bue med skilt, som man kører under.
     const start = route.getPointAt(0);
     const tangent = route.getTangentAt(0);
+    const heading = Math.atan2(tangent.x, tangent.z);
     const gate = new THREE.Group();
-    gate.position.set(start.x, 0, start.z);
-    gate.rotation.y = Math.atan2(tangent.x, tangent.z);
+    gate.rotation.y = heading;
     const checker = canvasTexture(128, 32, (context) => {
       for (let x = 0; x < 16; x++) {
         for (let y = 0; y < 4; y++) {
@@ -415,17 +525,24 @@ export class RaceScene {
         }
       }
     });
+    const lineGeometry = new THREE.PlaneGeometry(TRACK_WIDTH, 1.6, 6, 1);
+    lineGeometry.rotateX(-Math.PI / 2);
+    const gateBase = this.drape(lineGeometry, start.x, start.z, heading);
+    gate.position.set(start.x, gateBase, start.z);
     const line = new THREE.Mesh(
-      new THREE.PlaneGeometry(TRACK_WIDTH, 1.6),
+      lineGeometry,
       new THREE.MeshBasicMaterial({ map: checker, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
     );
-    line.rotation.x = -Math.PI / 2;
     line.position.y = 0.07;
     gate.add(line);
     const post = new THREE.CylinderGeometry(0.28, 0.34, 6, 10);
+    let pillarTop = 6;
     for (const side of [-1, 1]) {
       const pillar = new THREE.Mesh(post, this.toon("#f2f2f2"));
-      pillar.position.set(side * (TRACK_WIDTH / 2 + 1.1), 3, 0);
+      const lx = side * (TRACK_WIDTH / 2 + 1.1);
+      const ground = terrainHeightAt(start.x + lx * Math.cos(heading), start.z - lx * Math.sin(heading)) - gateBase;
+      pillar.position.set(lx, ground + 3, 0);
+      pillarTop = Math.max(pillarTop, ground + 6);
       pillar.castShadow = true;
       this.outline(pillar, 1.12);
       gate.add(pillar);
@@ -452,7 +569,7 @@ export class RaceScene {
       new THREE.BoxGeometry(TRACK_WIDTH + 2.6, 1.3, 0.4),
       [bannerEdge, bannerEdge, bannerEdge, bannerEdge, bannerFace, bannerFace],
     );
-    banner.position.y = 6;
+    banner.position.y = pillarTop;
     banner.castShadow = true;
     this.outline(banner, 1.04);
     gate.add(banner);
@@ -469,33 +586,8 @@ export class RaceScene {
       }
       return shape;
     };
-    const flatMesh = (flat: readonly number[], material: THREE.Material, y: number): void => {
-      const mesh = new THREE.Mesh(new THREE.ShapeGeometry(toShape(flat)), material);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = y;
-      mesh.receiveShadow = true;
-      this.scene.add(mesh);
-    };
 
-    const forestMaterial = new THREE.MeshLambertMaterial({ color: "#4eb04a" });
-    const parkMaterial = new THREE.MeshLambertMaterial({ color: "#8fdb62" });
-    const pitchMaterial = new THREE.MeshLambertMaterial({ color: "#5cc85a" });
-    const waterMaterial = new THREE.MeshLambertMaterial({ color: "#3fb7f2" });
-    for (const polygon of campus.parks) flatMesh(polygon, parkMaterial, -0.13);
-    for (const polygon of campus.pitches) flatMesh(polygon, pitchMaterial, -0.12);
-    for (const polygon of campus.forests) flatMesh(polygon, forestMaterial, -0.11);
-    for (const polygon of campus.water) flatMesh(polygon, waterMaterial, -0.09);
-    for (const stream of campus.streams) {
-      const points: THREE.Vector3[] = [];
-      for (let i = 0; i < stream.length; i += 2) points.push(new THREE.Vector3(stream[i], 0, stream[i + 1]));
-      if (points.length < 2) continue;
-      const curve = new THREE.CatmullRomCurve3(points);
-      const ribbon = new THREE.Mesh(new THREE.TubeGeometry(curve, points.length * 4, 0.45, 4, false), waterMaterial);
-      // Fladtrykt og under vejen, så bækken løber under vejen i stedet for ovenpå.
-      ribbon.scale.y = 0.15;
-      ribbon.position.y = -0.07;
-      this.scene.add(ribbon);
-    }
+    // Græs, parker, skov, vand og bække er malet i terrænets tekstur (addTerrain).
 
     // Ét vindueslag pr. etage; teksturen ganges med væggens farve.
     const windows = canvasTexture(64, 64, (context) => {
@@ -514,24 +606,39 @@ export class RaceScene {
       (color) => this.toon(color, { map: windows }),
     );
     campus.buildings.forEach((building, index) => {
+      // Soklen følger det laveste terræn under fodaftrykket; væggene forlænges, så de når ned til det.
+      let low = Infinity;
+      let high = -Infinity;
+      let sumX = 0;
+      let sumZ = 0;
+      const count = building.p.length / 2;
+      for (let i = 0; i < building.p.length; i += 2) {
+        const x = building.p[i];
+        const z = building.p[i + 1];
+        const next = (i + 2) % building.p.length;
+        sumX += x;
+        sumZ += z;
+        for (const f of [0, 0.5]) {
+          const ground = terrainHeightAt(x + (building.p[next] - x) * f, z + (building.p[next + 1] - z) * f);
+          low = Math.min(low, ground);
+          high = Math.max(high, ground);
+        }
+      }
+      const centerGround = terrainHeightAt(sumX / count, sumZ / count);
+      low = Math.min(low, centerGround);
+      high = Math.max(high, centerGround);
       const mesh = new THREE.Mesh(
-        new THREE.ExtrudeGeometry(toShape(building.p), { depth: building.h, bevelEnabled: false }),
+        new THREE.ExtrudeGeometry(toShape(building.p), { depth: building.h + (high - low) + 0.05, bevelEnabled: false }),
         [roofs[index % roofs.length], walls[(index * 7) % walls.length]],
       );
       mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = low - 0.05;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.scene.add(mesh);
       if (building.n) {
-        let sumX = 0;
-        let sumZ = 0;
-        for (let i = 0; i < building.p.length; i += 2) {
-          sumX += building.p[i];
-          sumZ += building.p[i + 1];
-        }
-        const count = building.p.length / 2;
         const label = this.createTextSprite(building.n, "#e9ecd9");
-        label.position.set(sumX / count, building.h + 2.2, sumZ / count);
+        label.position.set(sumX / count, high + building.h + 2.2, sumZ / count);
         this.scene.add(label);
       }
     });
@@ -553,11 +660,12 @@ export class RaceScene {
     const greens = ["#2f9e44", "#3fb54e", "#58c75a", "#7ad05f"].map((color) => new THREE.Color(color));
     const matrix = new THREE.Matrix4();
     trees.forEach(({ x, z, scale }, index) => {
-      matrix.makeScale(scale, scale, scale).setPosition(x, scale, z);
+      const ground = terrainHeightAt(x, z) - 0.1;
+      matrix.makeScale(scale, scale, scale).setPosition(x, ground + scale, z);
       trunks.setMatrixAt(index, matrix);
-      matrix.makeScale(scale, scale * 0.9, scale).setPosition(x, 2.5 * scale, z);
+      matrix.makeScale(scale, scale * 0.9, scale).setPosition(x, ground + 2.5 * scale, z);
       crowns.setMatrixAt(index, matrix);
-      matrix.makeScale(scale, scale, scale).setPosition(x, 3.7 * scale, z);
+      matrix.makeScale(scale, scale, scale).setPosition(x, ground + 3.7 * scale, z);
       tops.setMatrixAt(index, matrix);
       const tint = greens[Math.floor(((x * 12.9898 + z * 78.233) % 1 + 1) * 7) % greens.length];
       crowns.setColorAt(index, tint);
@@ -610,7 +718,8 @@ export class RaceScene {
     const body = new THREE.Group();
     body.scale.setScalar(KART_SCALE);
     root.add(body);
-    root.position.set(data.x, 0.03, data.z);
+    root.position.set(data.x, terrainHeightAt(data.x, data.z) + 0.03, data.z);
+    root.rotation.order = "YXZ";
     const paint = this.toon(color);
     const trim = this.toon(`#${new THREE.Color(color).multiplyScalar(0.6).getHexString()}`);
     const dark = this.toon("#252b33");
@@ -721,7 +830,7 @@ export class RaceScene {
     root.add(label);
     const kart: KartMesh = {
       root, body, wheels, frontPivots, steeringWheel, flames, color, name,
-      nameCanvas: labelCanvas, nameLabel: label, target: data, heading: data.heading, slide: 0, lean: 0,
+      nameCanvas: labelCanvas, nameLabel: label, target: data, heading: data.heading, slide: 0, lean: 0, pitch: 0, roll: 0,
     };
     this.updateNameLabel(kart, name);
     return kart;
@@ -792,8 +901,10 @@ export class RaceScene {
     const forward = new THREE.Vector3(-Math.sin(kart.heading), 0, -Math.cos(kart.heading));
     const right = new THREE.Vector3(Math.cos(kart.heading), 0, -Math.sin(kart.heading));
     const rate = delta * 60;
+    const ground = (point: THREE.Vector3, height: number): THREE.Vector3 =>
+      point.setY(terrainHeightAt(point.x, point.z) + height);
     const rearAt = (side: number, height: number): THREE.Vector3 =>
-      kart.root.position.clone().addScaledVector(forward, -1.2).addScaledVector(right, side * 1.2).setY(height);
+      ground(kart.root.position.clone().addScaledVector(forward, -1.2).addScaledVector(right, side * 1.2), height);
 
     if (data.driftDir !== 0 && data.respawn <= 0) {
       const level = DRIFT_LEVELS.filter((threshold) => data.driftCharge >= threshold).length;
@@ -813,12 +924,12 @@ export class RaceScene {
       for (const side of [-0.34, 0.34]) {
         if (Math.random() > 0.9 * rate) continue;
         const jet = forward.clone().multiplyScalar(-9).add(new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() * 1.2, (Math.random() - 0.5) * 1.5));
-        const origin = kart.root.position.clone().addScaledVector(forward, -1.9).addScaledVector(right, side * KART_SCALE).setY(0.85);
+        const origin = ground(kart.root.position.clone().addScaledVector(forward, -1.9).addScaledVector(right, side * KART_SCALE), 0.85);
         this.emit(origin, jet, Math.random() < 0.5 ? "#ffb347" : "#ff5a36", 0.35, 0.9, 0.6, true, 0.95);
       }
     }
     if (data.spin > 0 && Math.random() < 0.4 * rate) {
-      this.emit(kart.root.position.clone().setY(2.8), new THREE.Vector3((Math.random() - 0.5) * 3, 0.5, (Math.random() - 0.5) * 3), "#ffe066", 0.6, 0.8, 0.3, true, 1);
+      this.emit(ground(kart.root.position.clone(), 2.8), new THREE.Vector3((Math.random() - 0.5) * 3, 0.5, (Math.random() - 0.5) * 3), "#ffe066", 0.6, 0.8, 0.3, true, 1);
     }
     
   }
@@ -851,7 +962,13 @@ export class RaceScene {
       kart.body.rotation.z = kart.lean;
       const hop = data.hop > 0 ? Math.sin((data.hop / 0.28) * Math.PI) * 0.45 : 0;
       const rumble = data.offroad ? Math.sin(time * 0.06) * 0.05 * speedRatio : 0;
-      kart.root.position.y = 0.03 + hop + rumble;
+      const ground = terrainFrame(kart.root.position.x, kart.root.position.z, kart.heading, 1.3 * KART_SCALE, KART_SCALE);
+      const tilt = 1 - Math.exp(-delta * 10);
+      kart.pitch += (ground.pitch - kart.pitch) * tilt;
+      kart.roll += (ground.roll - kart.roll) * tilt;
+      kart.root.rotation.x = kart.pitch;
+      kart.root.rotation.z = kart.roll;
+      kart.root.position.y = ground.y + 0.03 + hop + rumble;
       for (const wheel of kart.wheels) wheel.rotation.x -= (data.speed / 0.45) * delta;
       for (const pivot of kart.frontPivots) pivot.rotation.y = -data.steerAmt * 0.45;
       kart.steeringWheel.rotation.z = -data.steerAmt * 1.2;
@@ -869,10 +986,14 @@ export class RaceScene {
     for (const mesh of this.objectMeshes.values()) {
       mesh.position.x += ((mesh.userData.targetX as number) - mesh.position.x) * follow;
       mesh.position.z += ((mesh.userData.targetZ as number) - mesh.position.z) * follow;
+      const lift = mesh.userData.lift as number | undefined;
+      if (lift !== undefined) {
+        const bob = mesh.userData.kind === "box" ? Math.sin(time * 0.003 + mesh.position.x) * 0.2 : 0;
+        mesh.position.y = lift + terrainHeightAt(mesh.position.x, mesh.position.z) + bob;
+      }
       if (mesh.userData.kind === "box") {
         mesh.rotation.y += delta * 1.6;
         mesh.rotation.x += delta * 0.8;
-        mesh.position.y = 1.4 + Math.sin(time * 0.003 + mesh.position.x) * 0.2;
       }
       if (mesh.userData.kind === "frisbee") mesh.rotation.y += delta * 18;
     }
@@ -899,6 +1020,9 @@ export class RaceScene {
         if (!buildingColliders.some((building) => pointInPolygon(building, eye.x, eye.z))) break;
       }
       this.camera.position.lerp(eye, 1 - Math.exp(-delta * 8));
+      // Kameraet må ikke dykke ned under en bakke.
+      const floor = terrainHeightAt(this.camera.position.x, this.camera.position.z) + 1.2;
+      if (this.camera.position.y < floor) this.camera.position.y = floor;
       if (data.boost > 0) this.camera.position.add(new THREE.Vector3((Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.08, 0));
       const look = position.clone().addScaledVector(forward, 7).add(new THREE.Vector3(0, 1.2, 0));
       this.camera.lookAt(look);
