@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { campus } from "./campus-data.js";
 import { DRIFT_LEVELS, type PlayerState, type RaceObject } from "./race.js";
-import { terrainBounds, terrainFrame, terrainHeightAt, terrainStep } from "./terrain.js";
+import { roadWeightAt, terrainBounds, terrainFrame, terrainHeightAt, terrainStep } from "./terrain.js";
 import { BASE_SPEED, route, ROUTE_LENGTH, TRACK_WIDTH } from "./track.js";
 import { buildingColliders, pointInPolygon, trees } from "./world.js";
 
@@ -9,6 +9,7 @@ const SKY = "#a9dcff";
 const OUTLINE = new THREE.MeshBasicMaterial({ color: "#0f1519", side: THREE.BackSide });
 const DRIFT_COLORS = ["#f4f1e0", "#4db4ff", "#ff9a3c", "#c77dff"];
 const KART_SCALE = 1.2;
+const ROAD_MESH_DIP = 0.3;
 
 interface KartMesh {
   root: THREE.Group;
@@ -376,7 +377,8 @@ export class RaceScene {
       for (let i = 0; i < cols; i++) {
         const x = Math.min(maxX, minX + i * terrainStep);
         const n = j * cols + i;
-        positions.set([x, terrainHeightAt(x, z), z], n * 3);
+        // Under vejen sænkes meshet en smule, så trekanternes skrå flader aldrig stikker op gennem vejbåndet i sving.
+        positions.set([x, terrainHeightAt(x, z) - ROAD_MESH_DIP * roadWeightAt(x, z), z], n * 3);
         uvs.set([(x - minX) / width, 1 - (z - minZ) / depth], n * 2);
       }
     }
@@ -1033,8 +1035,16 @@ export class RaceScene {
         eye.lerpVectors(position, target, fraction);
         if (!buildingColliders.some((building) => pointInPolygon(building, eye.x, eye.z))) break;
       }
+      // Kameraet må ikke ligge under terrænet, og terrænet må ikke skygge for sigtelinjen til karten (fx over en bakketop).
+      const lookTarget = position.clone().add(new THREE.Vector3(0, 1.2, 0));
+      eye.y = Math.max(eye.y, terrainHeightAt(eye.x, eye.z) + 1.4);
+      for (let fraction = 0.1; fraction < 0.95; fraction += 0.1) {
+        const sx = eye.x + (lookTarget.x - eye.x) * fraction;
+        const sz = eye.z + (lookTarget.z - eye.z) * fraction;
+        const needed = (terrainHeightAt(sx, sz) + 0.8 - lookTarget.y * fraction) / (1 - fraction);
+        if (needed > eye.y) eye.y = needed;
+      }
       this.camera.position.lerp(eye, 1 - Math.exp(-delta * 8));
-      // Kameraet må ikke dykke ned under en bakke.
       const floor = terrainHeightAt(this.camera.position.x, this.camera.position.z) + 1.2;
       if (this.camera.position.y < floor) this.camera.position.y = floor;
       if (data.boost > 0) this.camera.position.add(new THREE.Vector3((Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.08, 0));

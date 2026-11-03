@@ -76,6 +76,8 @@ Datakilden er [Mapterhorn](https://mapterhorn.com), som udstiller DHM/Terræn so
 
 Højderne gengives 3 gange overdrevet (`HEIGHT_EXAGGERATION` i `client/src/terrain.ts`), fordi banens reelle relief på ca. 14 m ellers ikke kan ses, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og karts, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
 
+Vejen er flad på tværs og følger en udglattet højdeprofil langs midterlinjen (`terrain.ts`). Terrænet graves eller fyldes op til vejen med en blød skråning, så terrænet ikke stikker op gennem vejen, og karts kører på vejfladen. Hvor to strækninger af ruten ligger tæt i forskellig højde, blandes skråningerne. Kameraet løftes, så terrænet ikke ligger mellem kamera og kart (fx over en bakketop).
+
 > Terrændata: Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), CC BY 4.0, <https://dataforsyningen.dk/>, leveret som åbne højdefliser af Mapterhorn (<https://mapterhorn.com>). Data er omprøvet og omsat til et grovere gitter i spillets koordinater. Kreditering skal stå adskilt fra OpenStreetMap-krediteringen. Private tokens må aldrig lægges i repositoriet eller klientkoden.
 
 ## Prototypeomfang
