@@ -2,11 +2,13 @@ import { campus, METERS_PER_UNIT } from "./campus-data.js";
 import { terrain } from "./terrain-data.js";
 
 // Terrænhøjde i spilenheder (y). Uden genererede højdedata (tools/terrain-data.mjs) er terrænet fladt.
-// Højderne er DHM/Terræn omregnet til spilenheder uden overdrivelse og med rutens startpunkt som y = 0.
+// Højderne er DHM/Terræn omregnet til spilenheder med rutens startpunkt som y = 0 og ganget med
+// HEIGHT_EXAGGERATION: banens reelle relief (ca. 14 m) er ellers for lille til at kunne ses i et kartspil.
 // Mod kanten af området glider højden mod 0, så terrænet møder det flade omland uden skel.
 
 const MARGIN = 30;
 const EDGE_FADE = 18;
+const HEIGHT_EXAGGERATION = 3;
 
 function bounds(): { minX: number; maxX: number; minZ: number; maxZ: number } {
   if (terrain) {
@@ -47,7 +49,7 @@ const heights = ((): Float32Array | null => {
   const view = new DataView(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i++) view.setUint8(i, binary.charCodeAt(i));
   const out = new Float32Array(count);
-  for (let i = 0; i < count; i++) out[i] = (view.getInt16(i * 2, true) / 100 - terrain.baseM) / METERS_PER_UNIT;
+  for (let i = 0; i < count; i++) out[i] = (view.getInt16(i * 2, true) / 100 - terrain.baseM) * HEIGHT_EXAGGERATION / METERS_PER_UNIT;
   return out;
 })();
 

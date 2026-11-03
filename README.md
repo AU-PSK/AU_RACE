@@ -74,7 +74,7 @@ Datakilden er [Mapterhorn](https://mapterhorn.com), som udstiller DHM/Terræn so
 4. Alternativt: officielle DHM/Terræn-GeoTIFF-fliser fra [Dataforsyningen](https://dataforsyningen.dk/) (kræver egen konto) kan bygges med `npm run terrain -- build data/<flise>.tif ... --vintage "<dataårgang>"`; `bounds` viser, hvilke fliser der skal bruges.
 5. `npm run terrain -- selftest` afprøver værktøjet, og `npm run terrain -- reset` fjerner højdedata igen.
 
-Højderne gengives uden overdrivelse, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og karts, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
+Højderne gengives 3 gange overdrevet (`HEIGHT_EXAGGERATION` i `client/src/terrain.ts`), fordi banens reelle relief på ca. 14 m ellers ikke kan ses, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og karts, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
 
 > Terrændata: Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), CC BY 4.0, <https://dataforsyningen.dk/>, leveret som åbne højdefliser af Mapterhorn (<https://mapterhorn.com>). Data er omprøvet og omsat til et grovere gitter i spillets koordinater. Kreditering skal stå adskilt fra OpenStreetMap-krediteringen. Private tokens må aldrig lægges i repositoriet eller klientkoden.
 

@@ -393,6 +393,20 @@ export class RaceScene {
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
+    // Højdeskygge: lavt terræn er mørkere og højt lysere, så bakker og dale kan aflæses selv uden skarpe skygger.
+    let lowest = Infinity;
+    let highest = -Infinity;
+    for (let n = 0; n < cols * rows; n++) {
+      lowest = Math.min(lowest, positions[n * 3 + 1]);
+      highest = Math.max(highest, positions[n * 3 + 1]);
+    }
+    const colors = new Float32Array(cols * rows * 3);
+    for (let n = 0; n < cols * rows; n++) {
+      const shade = 0.72 + 0.28 * ((positions[n * 3 + 1] - lowest) / Math.max(0.001, highest - lowest));
+      colors.set([shade, shade, shade], n * 3);
+    }
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
     const pixelsPerUnit = Math.min(4, 2048 / Math.max(width, depth));
     const landUse = canvasTexture(Math.ceil(width * pixelsPerUnit), Math.ceil(depth * pixelsPerUnit), (context) => {
       const px = (x: number): number => (x - minX) * pixelsPerUnit;
@@ -437,7 +451,7 @@ export class RaceScene {
     landUse.wrapS = THREE.ClampToEdgeWrapping;
     landUse.wrapT = THREE.ClampToEdgeWrapping;
 
-    const ground = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map: landUse }));
+    const ground = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map: landUse, vertexColors: true }));
     ground.position.y = -0.02;
     ground.receiveShadow = true;
     this.scene.add(ground);
