@@ -3,7 +3,8 @@
 //
 // Brug:
 //   node tools/terrain-data.mjs bounds
-//   node tools/terrain-data.mjs build <tile.tif> [<tile.tif> ...] [--out client/src/terrain-data.ts]
+//   node tools/terrain-data.mjs fetch-tiles             (åbne DHM/Terræn-fliser via Mapterhorn, ingen konto; kræver Python + Pillow)
+//   node tools/terrain-data.mjs build <tile.tif | data/mapterhorn.json> [...] [--out client/src/terrain-data.ts]
 //        [--step-m 4] [--margin 30] [--vintage "2023"] [--fill-missing]
 //   node tools/terrain-data.mjs selftest
 //   node tools/terrain-data.mjs synthetic <out.tif>     (kunstigt raster til at afprøve kæden; ikke rigtige data)
@@ -15,6 +16,7 @@
 // spil-xz → lat/lon → ETRS89 / UTM zone 32N (EPSG:25832) → pixel. Hver gittercelle er middelværdien af de
 // underliggende pixels. Manglende data (NoData) afbryder med en tydelig fejl, medmindre --fill-missing angives.
 import { readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { deflateSync, inflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { dirname, join, basename } from "node:path";
@@ -27,6 +29,10 @@ const DEFAULT_OUT = join(root, "client", "src", "terrain-data.ts");
 const ATTRIBUTION =
   "Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), " +
   "CC BY 4.0, https://dataforsyningen.dk/. Data er omsat til et grovere gitter i spillets koordinater.";
+const MAPTERHORN_ATTRIBUTION =
+  "Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), " +
+  "CC BY 4.0, https://dataforsyningen.dk/, leveret som åbne højdefliser af Mapterhorn (https://mapterhorn.com). " +
+  "Data er omprøvet og omsat til et grovere gitter i spillets koordinater.";
 
 // ---------------------------------------------------------------- UTM zone 32N (ETRS89 ≈ GRS80)
 
@@ -84,6 +90,21 @@ async function loadCampus() {
     // spil-xz (enheder) → UTM
     gameToUtm(x, z) {
       return toUtm32(lat0 - (z * metersPerUnit) / M_PER_LAT, lon0 + (x * metersPerUnit) / mPerLon);
+    },
+    gameToLatLon(x, z) {
+      return { lat: lat0 - (z * metersPerUnit) / M_PER_LAT, lon: lon0 + (x * metersPerUnit) / mPerLon };
+    },
+    // spil-xz → positioner i begge understøttede rastersystemer (UTM 32N og Web Mercator) og Mercators længdeskala
+    gameToPositions(x, z) {
+      const lat = lat0 - (z * metersPerUnit) / M_PER_LAT;
+      const lon = lon0 + (x * metersPerUnit) / mPerLon;
+      const R = 6378137;
+      const rad = (lat * Math.PI) / 180;
+      return {
+        utm: toUtm32(lat, lon),
+        merc: { e: (R * lon * Math.PI) / 180, n: R * Math.asinh(Math.tan(rad)) },
+        mercScale: 1 / Math.cos(rad),
+      };
     },
   };
 }
@@ -375,15 +396,18 @@ export function writeGeoTiff({ width, height, x0, y0, px, py, data, deflate = tr
 
 // ---------------------------------------------------------------- Sampling
 
-function sampleCell(rasters, e, n, cellM) {
+function sampleCell(rasters, pos, cellM) {
   let sum = 0;
   let valid = 0;
   let expected = 0;
   for (const r of rasters) {
-    const c0 = Math.ceil((e - cellM / 2 - r.x0) / r.px - 0.5);
-    const c1 = Math.floor((e + cellM / 2 - r.x0) / r.px - 0.5);
-    const r0 = Math.ceil((r.y0 - (n + cellM / 2)) / r.py - 0.5);
-    const r1 = Math.floor((r.y0 - (n - cellM / 2)) / r.py - 0.5);
+    const merc = r.crs === "merc";
+    const { e, n } = merc ? pos.merc : pos.utm;
+    const size = merc ? cellM * pos.mercScale : cellM;
+    const c0 = Math.ceil((e - size / 2 - r.x0) / r.px - 0.5);
+    const c1 = Math.floor((e + size / 2 - r.x0) / r.px - 0.5);
+    const r0 = Math.ceil((r.y0 - (n + size / 2)) / r.py - 0.5);
+    const r1 = Math.floor((r.y0 - (n - size / 2)) / r.py - 0.5);
     for (let row = Math.max(0, r0); row <= Math.min(r.height - 1, r1); row++) {
       for (let col = Math.max(0, c0); col <= Math.min(r.width - 1, c1); col++) {
         expected++;
@@ -395,7 +419,9 @@ function sampleCell(rasters, e, n, cellM) {
       }
     }
   }
-  const nominal = Math.max(1, Math.round(cellM / rasters[0].px) * Math.round(cellM / rasters[0].py));
+  const first = rasters[0];
+  const nominalSize = first.crs === "merc" ? cellM * pos.mercScale : cellM;
+  const nominal = Math.max(1, Math.round(nominalSize / first.px) * Math.round(nominalSize / first.py));
   // Mindst halvdelen af cellens pixels skal findes; ellers regnes cellen som manglende.
   return expected > 0 && valid >= nominal * 0.5 ? sum / valid : NaN;
 }
@@ -469,8 +495,37 @@ async function commandBounds() {
   for (let n = nmin; n <= nmax; n++) for (let e = emin; e <= emax; e++) console.log(`  N ${n}, E ${e}`);
 }
 
+async function readMercatorRaster(jsonPath) {
+  const meta = JSON.parse(await readFile(jsonPath, "utf8"));
+  if (meta.kind !== "mapterhorn-terrarium-webmercator") throw new Error(`${basename(jsonPath)}: ukendt rastertype ${meta.kind}`);
+  const bytes = await readFile(join(dirname(jsonPath), meta.file));
+  if (bytes.length !== meta.width * meta.height * 4) throw new Error(`${meta.file}: forkert størrelse (${bytes.length} byte, forventer ${meta.width * meta.height * 4})`);
+  const data = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length));
+  return { name: basename(jsonPath), crs: "merc", meta, x0: meta.x0, y0: meta.y0, px: meta.px, py: meta.px, width: meta.width, height: meta.height, data, noData: null };
+}
+
+async function commandFetchTiles(flags) {
+  const world = await loadCampus();
+  const grid = gridFor(world.campus, 1, 30);
+  const corners = [
+    [grid.x0, grid.z0],
+    [grid.x0 + (grid.cols - 1) * grid.step, grid.z0],
+    [grid.x0, grid.z0 + (grid.rows - 1) * grid.step],
+    [grid.x0 + (grid.cols - 1) * grid.step, grid.z0 + (grid.rows - 1) * grid.step],
+  ].map(([x, z]) => world.gameToLatLon(x, z));
+  const lats = corners.map((c) => c.lat);
+  const lons = corners.map((c) => c.lon);
+  // Lidt luft rundt om området, så cellernes middelværdi har pixels hele vejen ud.
+  const bbox = [Math.min(...lats) - 0.0005, Math.min(...lons) - 0.001, Math.max(...lats) + 0.0005, Math.max(...lons) + 0.001];
+  const out = flags.out ?? join(root, "data", "mapterhorn");
+  const args = [join(here, "fetch-terrain-tiles.py"), "--bbox", ...bbox.map(String), "--zoom", String(flags.zoom ?? 17), "--out", out];
+  const result = spawnSync("python", args, { stdio: "inherit" });
+  if (result.status !== 0) throw new Error("Hentning af højdefliser mislykkedes (se ovenfor).");
+  console.log(`Byg derefter terrændata med: npm run terrain -- build ${out}.json`);
+}
+
 async function commandBuild(files, flags) {
-  if (!files.length) throw new Error("Angiv mindst én GeoTIFF: build <fil.tif> [...]");
+  if (!files.length) throw new Error("Angiv mindst én kilde: build <fil.tif|mapterhorn.json> [...]");
   const world = await loadCampus();
   const stepM = Number(flags["step-m"] ?? 4);
   const margin = Number(flags.margin ?? 30);
@@ -479,7 +534,15 @@ async function commandBuild(files, flags) {
 
   const rasters = [];
   for (const file of files) {
+    if (file.toLowerCase().endsWith(".json")) {
+      const raster = await readMercatorRaster(file);
+      const trueM = raster.px * Math.cos((world.lat0 * Math.PI) / 180);
+      console.log(`${raster.name}: ${raster.width}×${raster.height} px, ca. ${trueM.toFixed(2)} m/px (Web Mercator, zoom ${raster.meta.zoom})`);
+      rasters.push(raster);
+      continue;
+    }
     const raster = readGeoTiff(await readFile(file), basename(file));
+    raster.crs = "utm";
     if (raster.horizontalEpsg !== null && raster.horizontalEpsg !== 25832) throw new Error(`${raster.name}: koordinatsystem EPSG:${raster.horizontalEpsg}, forventer 25832`);
     if (raster.horizontalEpsg === null) console.warn(`ADVARSEL ${raster.name}: koordinatsystemet står ikke i filen; antager EPSG:25832`);
     if (raster.verticalEpsg !== null && raster.verticalEpsg !== 5799) throw new Error(`${raster.name}: højdedatum EPSG:${raster.verticalEpsg}, forventer 5799 (DVR90)`);
@@ -489,15 +552,16 @@ async function commandBuild(files, flags) {
     console.log(`${raster.name}: ${raster.width}×${raster.height} px, ${raster.px} m/px, E ${raster.x0}–${raster.x0 + raster.width * raster.px}, N ${raster.y0 - raster.height * raster.py}–${raster.y0}`);
     rasters.push(raster);
   }
+  if (new Set(rasters.map((r) => r.crs)).size > 1) throw new Error("Bland ikke GeoTIFF-fliser (UTM) og Mapterhorn-udsnit i samme build.");
   if (new Set(rasters.map((r) => r.px)).size > 1) throw new Error("Fliserne har forskellig pixelstørrelse; de skal omprøves til ét gitter først.");
+  const viaMapterhorn = rasters[0].crs === "merc";
 
   const grid = gridFor(world.campus, stepUnits, margin);
   const heights = new Float64Array(grid.cols * grid.rows);
   const missingCells = [];
   for (let j = 0; j < grid.rows; j++) {
     for (let i = 0; i < grid.cols; i++) {
-      const { e, n } = world.gameToUtm(grid.x0 + i * grid.step, grid.z0 + j * grid.step);
-      const h = sampleCell(rasters, e, n, stepM);
+      const h = sampleCell(rasters, world.gameToPositions(grid.x0 + i * grid.step, grid.z0 + j * grid.step), stepM);
       heights[j * grid.cols + i] = h;
       if (Number.isNaN(h)) missingCells.push([i, j]);
     }
@@ -553,23 +617,41 @@ async function commandBuild(files, flags) {
     previous = { x: start[k], z: start[k + 1], h };
   }
 
-  const meta = {
-    source: "DHM/Terræn (Danmarks Højdemodel)",
-    license: "CC BY 4.0",
-    attribution: ATTRIBUTION,
-    crs: "ETRS89 / UTM zone 32N (EPSG:25832); ETRS89 sidestilles med WGS84 (afvigelse under ca. 1 m)",
-    verticalDatum: "DVR90 (EPSG:5799)",
-    unit: "m",
-    inputs: rasters.map((r) => `${r.name} (${r.px} m/px)`),
-    vintage: flags.vintage ?? "ukendt (angiv med --vintage)",
-    resampling: `middelværdi af kildepixels pr. ${stepM} m-celle; bilineær interpolation i spillet`,
-    cellMeters: stepM,
-    filledCells: filled,
-    generated: new Date().toISOString(),
-  };
+  const attribution = viaMapterhorn ? MAPTERHORN_ATTRIBUTION : ATTRIBUTION;
+  const first = rasters[0];
+  const meta = viaMapterhorn
+    ? {
+        source: "DHM/Terræn (Danmarks Højdemodel) via Mapterhorn (tiles.mapterhorn.com, terrarium-kodede fliser, zoom " + first.meta.zoom + ")",
+        sourceCatalog: "https://github.com/mapterhorn/mapterhorn/tree/main/source-catalog/dk",
+        license: "CC BY 4.0",
+        attribution,
+        crs: "Web Mercator (EPSG:3857) i kilden; omregnet til spillets lokale koordinater",
+        verticalDatum: "DVR90 ifølge DHM/Terræn; kun relative højder bruges (nulpunkt = rutens start), så et eventuelt konstant datumskift har ingen virkning",
+        unit: "m",
+        inputs: rasters.map((r) => `${r.name} (ca. ${(r.px * Math.cos((world.lat0 * Math.PI) / 180)).toFixed(2)} m/px, hentet ${r.meta.fetched})`),
+        vintage: flags.vintage ?? "Mapterhorn-udtræk; kilde DHM/Terræn tilgået 2025 (Mapterhorn source-catalog)",
+        resampling: `Mapterhorn har omprøvet DHM/Terræn til fliser; her middelværdi af pixels pr. ${stepM} m-celle; bilineær interpolation i spillet`,
+        cellMeters: stepM,
+        filledCells: filled,
+        generated: new Date().toISOString(),
+      }
+    : {
+        source: "DHM/Terræn (Danmarks Højdemodel)",
+        license: "CC BY 4.0",
+        attribution,
+        crs: "ETRS89 / UTM zone 32N (EPSG:25832); ETRS89 sidestilles med WGS84 (afvigelse under ca. 1 m)",
+        verticalDatum: "DVR90 (EPSG:5799)",
+        unit: "m",
+        inputs: rasters.map((r) => `${r.name} (${r.px} m/px)`),
+        vintage: flags.vintage ?? "ukendt (angiv med --vintage)",
+        resampling: `middelværdi af kildepixels pr. ${stepM} m-celle; bilineær interpolation i spillet`,
+        cellMeters: stepM,
+        filledCells: filled,
+        generated: new Date().toISOString(),
+      };
   const source = `// Genereret af tools/terrain-data.mjs. Ret ikke i hånden; kør generatoren igen.
-// ${ATTRIBUTION}
-// Højder er DVR90 i centimeter (Int16, little-endian, række for række fra nord mod syd i spillet, ${grid.cols}×${grid.rows} celler).
+// ${attribution}
+// Højder i centimeter (Int16, little-endian, række for række fra nord mod syd i spillet, ${grid.cols}×${grid.rows} celler).
 // Spilhøjde y = (højde[m] − baseM) / METERS_PER_UNIT, så ruten starter i y = 0.
 export interface TerrainGrid {
   x0: number;
@@ -585,8 +667,8 @@ export const terrainMeta: Record<string, unknown> | null = ${JSON.stringify(meta
 `;
   await writeFile(flags.out ?? DEFAULT_OUT, source);
   console.log(`Skrev ${flags.out ?? DEFAULT_OUT}: ${grid.cols}×${grid.rows} celler à ${stepM} m, ${Math.round(source.length / 1024)} kB`);
-  console.log(`Højde ${min.toFixed(1)}–${max.toFixed(1)} m (DVR90); rute ${routeMin.toFixed(1)}–${routeMax.toFixed(1)} m, største stigning ${(maxSlope * 100).toFixed(1)} %; nulpunkt ${baseM} m; udfyldte celler ${filled}`);
-  if (flags.vintage === undefined) console.warn("ADVARSEL: dataårgang er ikke angivet (--vintage); dokumentér den før PR 1 godkendes.");
+  console.log(`Højde ${min.toFixed(1)}–${max.toFixed(1)} m; rute ${routeMin.toFixed(1)}–${routeMax.toFixed(1)} m, største stigning ${(maxSlope * 100).toFixed(1)} %; nulpunkt ${baseM} m; udfyldte celler ${filled}`);
+  if (flags.vintage === undefined && !viaMapterhorn) console.warn("ADVARSEL: dataårgang er ikke angivet (--vintage); dokumentér den før PR 1 godkendes.");
 }
 
 function expect(condition, message) {
@@ -613,9 +695,13 @@ function commandSelftest() {
   }
   // Pixel (0,1) ligger 0,4 m syd for pixel (0,0), dvs. med lavere nordværdi.
   const raster = readGeoTiff(writeGeoTiff({ width, height, x0: 574000, y0: 6226000, px: 0.4, py: 0.4, data }), "test");
-  const cell = sampleCell([raster], 574000 + 0.2, 6226000 - 0.2 - 0.4, 0.4);
+  const cell = sampleCell([raster], { utm: { e: 574000 + 0.2, n: 6226000 - 0.2 - 0.4 } }, 0.4);
   expect(Math.abs(cell - data[width]) < 1e-5, `orientering gav ${cell}, forventer ${data[width]}`);
-  expect(Number.isNaN(sampleCell([raster], 574000 + 5 * 0.4 + 0.2, 6226000 - 5 * 0.4 - 0.2, 0.4)), "NoData skal give manglende celle");
+  expect(Number.isNaN(sampleCell([raster], { utm: { e: 574000 + 5 * 0.4 + 0.2, n: 6226000 - 5 * 0.4 - 0.2 } }, 0.4)), "NoData skal give manglende celle");
+  // Web Mercator: pixel (0,1) ligger syd for pixel (0,0); cellen skal vælge den rigtige pixel.
+  const merc = { crs: "merc", x0: 1000, y0: 2000, px: 0.6, py: 0.6, width, height, data, noData: null };
+  const mercCell = sampleCell([merc], { merc: { e: 1000 + 0.3, n: 2000 - 0.3 - 0.6 }, mercScale: 1 }, 0.6);
+  expect(Math.abs(mercCell - data[width]) < 1e-5, `Mercator-orientering gav ${mercCell}, forventer ${data[width]}`);
   console.log("Selvtest OK: UTM-omregning, GeoTIFF-læsning (strips/tiles, ingen/DEFLATE, forudsigere 1 og 3), orientering og NoData.");
 }
 
@@ -664,6 +750,7 @@ const { positional, flags } = parseArgs(process.argv.slice(2));
 const [command = "help", ...rest] = positional;
 try {
   if (command === "bounds") await commandBounds();
+  else if (command === "fetch-tiles") await commandFetchTiles(flags);
   else if (command === "build") await commandBuild(rest, flags);
   else if (command === "selftest") commandSelftest();
   else if (command === "synthetic") await commandSynthetic(rest[0]);
@@ -671,7 +758,8 @@ try {
   else
     console.log(`Brug:
   node tools/terrain-data.mjs bounds
-  node tools/terrain-data.mjs build <tile.tif> [...] [--out fil] [--step-m 4] [--margin 30] [--vintage ÅÅÅÅ] [--fill-missing]
+  node tools/terrain-data.mjs fetch-tiles      (henter åbne DHM/Terræn-fliser via Mapterhorn til data/; kræver ingen konto)
+  node tools/terrain-data.mjs build <tile.tif|data/mapterhorn.json> [...] [--out fil] [--step-m 4] [--margin 30] [--vintage ÅÅÅÅ] [--fill-missing]
   node tools/terrain-data.mjs selftest
   node tools/terrain-data.mjs synthetic <ud.tif>
   node tools/terrain-data.mjs reset            (fjerner højdedata igen, så verden er flad)`);

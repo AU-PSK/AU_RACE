@@ -55,15 +55,18 @@ For full license text, see: https://creativecommons.org/licenses/by/4.0/
 ### Data Quality Notes
 
 - Coverage: Nationwide (Denmark)
-- Campus coverage: NOT yet verified (no real raster has been downloaded or inspected; `terrain-data.ts` is currently a flat placeholder)
+- Campus coverage: verified. 90 Mapterhorn zoom-17 tiles were fetched (3963×4534 px, 0.33 m/px, heights 1.6–64.7 m in the crop); the built grid is 298×348 cells with 0 filled cells; the route spans 33.6–48.2 m with a maximum slope of 10.6 %
+- Source in use: Mapterhorn (https://mapterhorn.com, tiles.mapterhorn.com, terrarium-encoded WebP, Web Mercator). Its source catalogue (`source-catalog/dk`) lists "Danmarks Højdemodel – Terræn", Klimadatastyrelsen, 0.4 m, CC BY 4.0, access year 2025. Mapterhorn has resampled and blended the data; this is a no-token mirror, not the official download. Attribution must name both Klimadatastyrelsen/DHM and Mapterhorn
+- Vertical datum is DVR90 according to DHM/Terræn; Mapterhorn does not state it per tile. Only relative heights are used (route start = 0), so a constant offset has no effect
+- Terrain model (DTM, not DSM) rests on the catalogue entry; it has not been verified per tile
 - No-data values: Represented as -9999 in the raster; the build stops with a clear error unless `--fill-missing` (max 10 % of cells) is given
 - Interpolation: Cell mean at build time, bilinear sampling at runtime; heights fade to 0 over the outermost ~18 game units so the terrain meets the flat surroundings
 - Dataset vintage must be passed with `--vintage` and is recorded in the generated file
 
 ### Reproduction & Transparency
 
-1. The conversion is documented and runnable via `npm run terrain` (`tools/terrain-data.mjs`); it makes no network requests
-2. Credentials (API tokens) are never stored in the repository; download the GeoTIFF tiles yourself with your own account
+1. The conversion is documented and runnable via `npm run terrain` (`tools/terrain-data.mjs`); only `fetch-tiles` (`tools/fetch-terrain-tiles.py`) makes network requests, to tiles.mapterhorn.com, and needs no credentials
+2. Credentials (API tokens) are never stored in the repository; official GeoTIFF tiles from Dataforsyningen need your own account
 3. The generated file records source, licence, CRS, height datum, vintage, bounds, cell size and number of filled cells
 4. `npm run terrain -- selftest` verifies the reader, projection and orientation with synthetic data
 
