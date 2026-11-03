@@ -1,4 +1,4 @@
-import { BASE_SPEED, TRACK_WIDTH } from "./track.js";
+import { BASE_SPEED, ROUTE_LENGTH, TRACK_WIDTH } from "./track.js";
 import { nearestRouteT, pointInPolygon, resolveWorldCollision, routeFrame, waterAreas } from "./world.js";
 
 // Løbssimuleringen. Værten (eller solo-spilleren) kører den; gæster modtager kun resultatet.
@@ -6,6 +6,8 @@ import { nearestRouteT, pointInPolygon, resolveWorldCollision, routeFrame, water
 
 export type ItemKind = "coffee" | "paper" | "frisbee";
 export type RacePhase = "lobby" | "countdown" | "racing" | "results";
+/** Lyd, der afspilles hos den spiller, begivenheden gælder. */
+export type Sfx = "item" | "boost" | "hit" | "lap" | "fall" | "finish";
 
 export interface KartInput {
   throttle: boolean;
@@ -43,11 +45,23 @@ export interface PlayerState {
   wrongWay: boolean;
   startPress: number;
   useHeld: boolean;
+  /** Glidende rat, -1..1, så styringen ikke hakker på tastatur. */
+  steerAmt: number;
+  /** Nedtælling for drift-hoppet (kun til visning). */
+  hop: number;
+  /** Mens bonuskassen "ruller", kan bonussen ikke bruges endnu. */
+  itemRoll: number;
+  bot: boolean;
+  skill: number;
+  topScale: number;
+  botLane: number;
+  botTimer: number;
+  stuck: number;
 }
 
 export interface RaceObject {
   id: string;
-  kind: "box" | "paper" | "frisbee";
+  kind: "box" | "paper" | "frisbee" | "pad";
   x: number;
   z: number;
   heading: number;
@@ -71,35 +85,50 @@ export interface RaceState {
 export interface RaceEvent {
   playerId: string;
   message: string;
+  sfx?: Sfx;
 }
 
 export const IDLE_INPUT: KartInput = { throttle: false, brake: false, steer: 0, drift: false, useItem: false };
 export const ITEM_NAMES: Record<ItemKind, string> = { coffee: "Kaffeboost", paper: "Papirbunke", frisbee: "Frisbee" };
-export const BOOST_SPEED = 19;
+export const BOOST_SPEED = 27;
 export const TIME_LIMIT = 240;
+export const MAX_RACERS = 4;
+/** Driftladning, der skal til for blå, orange og lilla mini-turbo. */
+export const DRIFT_LEVELS = [0.6, 1.3, 2.1];
+export const BOT_NAMES = ["Lektor Lynet", "Studie-Stine", "Kaffe-Kim", "Professor Pedal"];
+export const BOT_COLORS = ["#ff5252", "#ffb703", "#2f7bff", "#ff7ac8"];
 
-const KART_RADIUS = 0.9;
-const OFFROAD_SPEED = 6;
-const ACCELERATION = 9;
-const BRAKING = 22;
-const REVERSE_SPEED = 4;
+const KART_RADIUS = 1;
+const OFFROAD_SPEED = BASE_SPEED * 0.55;
+const ACCELERATION = 13;
+const BRAKING = 26;
+const REVERSE_SPEED = 5;
 const COAST_DRAG = 4;
-const OVERSPEED_DRAG = 16;
-const TURN_RATE = 2.1;
-const DRIFT_MIN_SPEED = 7;
+const OVERSPEED_DRAG = 14;
+const TURN_RATE = 2.3;
+const STEER_RESPONSE = 9;
+const DRIFT_MIN_SPEED = 8;
+const DRIFT_HOP = 0.28;
 const MINI_TURBO = [
-  { charge: 1.6, boost: 1.2 },
-  { charge: 0.7, boost: 0.7 },
+  { charge: DRIFT_LEVELS[2], boost: 1.6 },
+  { charge: DRIFT_LEVELS[1], boost: 1.1 },
+  { charge: DRIFT_LEVELS[0], boost: 0.65 },
 ];
+const PAD_BOOST = 1;
+const PAD_RADIUS = 2.1;
+const ITEM_ROLL_TIME = 1.1;
 const OUT_OF_BOUNDS = 16;
 const RESPAWN_TIME = 1.2;
 const SPIN_TIME = 1;
-const FRISBEE_SPEED = 26;
+const FRISBEE_SPEED = 36;
 const FRISBEE_LIFETIME = 3;
 const PAPER_LIFETIME = 45;
 const BOX_RESPAWN = 5;
-const BOX_ROWS = [0.18, 0.5, 0.78];
-const BOX_OFFSETS = [-2.1, -0.7, 0.7, 2.1];
+const BOX_ROWS = [0.07, 0.27, 0.47, 0.67, 0.87];
+const BOX_OFFSETS = [-2.4, -0.8, 0.8, 2.4];
+const PAD_ROWS = [0.16, 0.37, 0.58, 0.79];
+const PAD_OFFSETS = [-1.3, 1.3];
+const BOT_SKILLS = [0.93, 0.9, 0.96, 0.88];
 const TIME_TRIAL_COFFEES = 3;
 
 export function createPlayer(name: string, role: "racer" | "spectator", color: string): PlayerState {
@@ -109,13 +138,14 @@ export function createPlayer(name: string, role: "racer" | "spectator", color: s
     progress: 0, routeT: 0, safeT: 0, lap: 1, place: 0, finished: false, finishTime: 0,
     item: null, itemCount: 0, boost: 0, driftDir: 0, driftCharge: 0, spin: 0, respawn: 0,
     offroad: false, wrongWay: false, startPress: -1, useHeld: false,
+    steerAmt: 0, hop: 0, itemRoll: 0, bot: false, skill: 1, topScale: 1, botLane: 0, botTimer: 0, stuck: 0,
   };
 }
 
 export function createRaceState(hostId: string): RaceState {
   return {
     players: new Map(), objects: new Map(), hostId,
-    phase: "lobby", countdown: 0, elapsed: 0, laps: 3, timeTrial: false, nextObjectId: 0,
+    phase: "lobby", countdown: 0, elapsed: 0, laps: 5, timeTrial: false, nextObjectId: 0,
   };
 }
 
@@ -140,7 +170,7 @@ export function prepareRace(state: RaceState): void {
     const side = index % 2 === 0 ? -1 : 1;
     const frame = routeFrame(t);
     Object.assign(player, createPlayer(player.name, player.role, player.color), {
-      host: player.host,
+      host: player.host, bot: player.bot, skill: player.skill, botLane: player.botLane,
       x: frame.x - frame.tz * side * 1.5,
       z: frame.z + frame.tx * side * 1.5,
       heading: headingAlong(frame.tx, frame.tz),
@@ -151,6 +181,15 @@ export function prepareRace(state: RaceState): void {
       itemCount: state.timeTrial ? TIME_TRIAL_COFFEES : 0,
     });
   });
+  for (const row of PAD_ROWS) {
+    const frame = routeFrame(row);
+    for (const offset of PAD_OFFSETS) {
+      addObject(state, {
+        kind: "pad", x: frame.x - frame.tz * offset, z: frame.z + frame.tx * offset,
+        heading: headingAlong(frame.tx, frame.tz), active: true, timer: 0, owner: "",
+      });
+    }
+  }
   if (state.timeTrial) return;
   for (const row of BOX_ROWS) {
     const frame = routeFrame(row);
@@ -168,8 +207,21 @@ export function resetToLobby(state: RaceState): void {
   state.elapsed = 0;
   state.countdown = 0;
   state.objects.clear();
-  for (const [, player] of state.players) {
-    Object.assign(player, createPlayer(player.name, player.role, player.color), { host: player.host });
+  for (const [id, player] of state.players) {
+    if (player.bot) state.players.delete(id);
+    else Object.assign(player, createPlayer(player.name, player.role, player.color), { host: player.host });
+  }
+}
+
+/** Fylder startfeltet op med computerstyrede karts, til der er MAX_RACERS racere. */
+export function addBots(state: RaceState): void {
+  let free = MAX_RACERS - racers(state).length;
+  for (let index = 0; free > 0; index++, free--) {
+    const bot = createPlayer(BOT_NAMES[index % BOT_NAMES.length], "racer", BOT_COLORS[index % BOT_COLORS.length]);
+    bot.bot = true;
+    bot.skill = BOT_SKILLS[index % BOT_SKILLS.length];
+    bot.botLane = ((index % 3) - 1) * 1.6;
+    state.players.set(`bot-${index}`, bot);
   }
 }
 
@@ -187,7 +239,8 @@ export function stepRace(state: RaceState, inputs: Map<string, KartInput>, dt: n
     state.countdown = Math.max(0, state.countdown - dt);
     for (const [id, player] of field) {
       // Raketstart: gas lige efter "2". For tidligt, og motoren går i stå.
-      if (inputs.get(id)?.throttle) {
+      const throttle = player.bot ? state.countdown < (player.skill > 0.89 ? 0.8 : 0.2) : inputs.get(id)?.throttle;
+      if (throttle) {
         if (player.startPress < 0) player.startPress = before;
       } else player.startPress = -1;
     }
@@ -196,7 +249,7 @@ export function stepRace(state: RaceState, inputs: Map<string, KartInput>, dt: n
       for (const [id, player] of field) {
         if (player.startPress >= 0.3 && player.startPress <= 1.2) {
           player.boost = 1;
-          events.push({ playerId: id, message: "Raketstart!" });
+          events.push({ playerId: id, message: "Raketstart!", sfx: "boost" });
         } else if (player.startPress > 2) {
           player.spin = 0.7;
           events.push({ playerId: id, message: "For tidligt på gassen – motoren gik i stå." });
@@ -208,8 +261,11 @@ export function stepRace(state: RaceState, inputs: Map<string, KartInput>, dt: n
   if (state.phase !== "racing") return { events, done: false };
 
   state.elapsed += dt;
+  rubberBand(field);
   for (const [id, player] of field) {
-    stepKart(state, id, player, player.finished ? IDLE_INPUT : inputs.get(id) ?? IDLE_INPUT, dt, events);
+    const input = player.finished ? IDLE_INPUT : player.bot ? botInput(player, field, dt) : inputs.get(id) ?? IDLE_INPUT;
+    stepKart(state, id, player, input, dt, events);
+    if (player.bot) unstick(player, dt);
   }
   collideKarts(field);
   stepObjects(state, field, dt, events);
@@ -223,8 +279,10 @@ function stepKart(state: RaceState, id: string, player: PlayerState, input: Kart
     player.speed = 0;
     return;
   }
-  const useNow = input.useItem && !player.useHeld;
+  const useNow = input.useItem && !player.useHeld && player.itemRoll <= 0;
   player.useHeld = input.useItem;
+  player.itemRoll = Math.max(0, player.itemRoll - dt);
+  player.hop = Math.max(0, player.hop - dt);
 
   if (player.spin > 0) {
     player.spin = Math.max(0, player.spin - dt);
@@ -249,7 +307,7 @@ function stepKart(state: RaceState, id: string, player: PlayerState, input: Kart
 
   if (waterAreas.some((area) => pointInPolygon(area, player.x, player.z))) {
     respawn(player);
-    events.push({ playerId: id, message: "Plask! Du kørte i søen og bliver sat tilbage på banen." });
+    events.push({ playerId: id, message: "Plask! Du kørte i søen og bliver sat tilbage på banen.", sfx: "fall" });
     return;
   }
   const nearest = nearestRouteT(player.x, player.z, player.routeT);
@@ -277,22 +335,25 @@ function stepKart(state: RaceState, id: string, player: PlayerState, input: Kart
     player.finished = true;
     player.finishTime = state.elapsed;
     player.item = null;
-    events.push({ playerId: id, message: `I mål efter ${state.elapsed.toFixed(1)} s!` });
+    events.push({ playerId: id, message: `I mål efter ${state.elapsed.toFixed(1)} s!`, sfx: "finish" });
   } else if (lapNow > lapBefore && lapNow >= 1) {
-    events.push({ playerId: id, message: lapNow + 1 === state.laps ? "Sidste omgang!" : `Omgang ${lapNow + 1} af ${state.laps}` });
+    events.push({ playerId: id, message: lapNow + 1 === state.laps ? "Sidste omgang!" : `Omgang ${lapNow + 1} af ${state.laps}`, sfx: "lap" });
   }
 }
 
 function steer(player: PlayerState, input: KartInput, dt: number): void {
+  player.steerAmt += (input.steer - player.steerAmt) * Math.min(1, STEER_RESPONSE * dt);
   // Drift: hold drift-tasten og styr. Retningen låses, og jo længere driften, jo større turbo bagefter.
   if (input.drift && player.driftDir === 0 && input.steer !== 0 && player.speed > DRIFT_MIN_SPEED && !player.offroad) {
     player.driftDir = input.steer;
     player.driftCharge = 0;
+    player.hop = DRIFT_HOP;
   }
   if (player.driftDir !== 0 && (!input.drift || player.speed < DRIFT_MIN_SPEED - 2)) endDrift(player, true);
 
-  const maxSpeed = player.boost > 0 ? BOOST_SPEED : player.offroad ? OFFROAD_SPEED : BASE_SPEED;
-  if (player.boost > 0) player.speed = Math.min(BOOST_SPEED, player.speed + 25 * dt);
+  const cruise = BASE_SPEED * player.topScale;
+  const maxSpeed = player.boost > 0 ? BOOST_SPEED : player.offroad ? OFFROAD_SPEED * player.topScale : cruise;
+  if (player.boost > 0) player.speed = Math.min(BOOST_SPEED, player.speed + 32 * dt);
   else if (input.throttle) player.speed = Math.min(Math.max(player.speed, maxSpeed), player.speed + ACCELERATION * dt);
   else if (input.brake) player.speed = Math.max(-REVERSE_SPEED, player.speed - (player.speed > 0 ? BRAKING : ACCELERATION * 0.6) * dt);
   else player.speed -= Math.sign(player.speed) * Math.min(Math.abs(player.speed), COAST_DRAG * dt);
@@ -301,11 +362,11 @@ function steer(player: PlayerState, input: KartInput, dt: number): void {
 
   let turn: number;
   if (player.driftDir !== 0) {
-    turn = player.driftDir * TURN_RATE * (0.85 + 0.45 * input.steer * player.driftDir);
-    if (!player.offroad) player.driftCharge += dt * (input.steer === player.driftDir ? 1.3 : 0.8);
+    turn = player.driftDir * TURN_RATE * (0.85 + 0.45 * player.steerAmt * player.driftDir);
+    if (!player.offroad) player.driftCharge += dt * (player.steerAmt * player.driftDir > 0.3 ? 1.3 : 0.8);
   } else {
     const grip = Math.min(1, Math.abs(player.speed) / 5) * Math.sign(player.speed);
-    turn = input.steer * TURN_RATE * (1 - 0.2 * Math.min(1, player.speed / BASE_SPEED)) * grip;
+    turn = player.steerAmt * TURN_RATE * (1 - 0.2 * Math.min(1, player.speed / BASE_SPEED)) * grip;
   }
   // Højresving (steer = 1) mindsker heading.
   player.heading -= turn * dt;
@@ -396,9 +457,20 @@ function stepObjects(state: RaceState, field: Array<[string, PlayerState]>, dt: 
         object.active = false;
         object.timer = BOX_RESPAWN;
         player.item = rollItem(player.place || field.length, field.length);
-        player.itemCount = 1;
-        events.push({ playerId, message: `Du fik ${ITEM_NAMES[player.item]} – tryk mellemrum` });
+        player.itemCount = player.item === "coffee" && player.place > field.length / 2 && Math.random() < 0.4 ? 3 : 1;
+        player.itemRoll = ITEM_ROLL_TIME;
+        events.push({ playerId, message: `Du fik ${ITEM_NAMES[player.item]} – tryk mellemrum`, sfx: "item" });
         break;
+      }
+      continue;
+    }
+
+    if (object.kind === "pad") {
+      for (const [playerId, player] of field) {
+        if (player.finished || player.respawn > 0) continue;
+        if (Math.hypot(player.x - object.x, player.z - object.z) > PAD_RADIUS) continue;
+        if (player.boost < PAD_BOOST * 0.5) events.push({ playerId, message: "", sfx: "boost" });
+        player.boost = Math.max(player.boost, PAD_BOOST);
       }
       continue;
     }
@@ -417,7 +489,7 @@ function stepObjects(state: RaceState, field: Array<[string, PlayerState]>, dt: 
       if (playerId === object.owner && age < 0.6) continue;
       if (Math.hypot(player.x - object.x, player.z - object.z) > 1.4) continue;
       if (spinOut(player)) {
-        events.push({ playerId, message: object.kind === "paper" ? "Du kørte ind i en papirbunke!" : "Ramt af en frisbee!" });
+        events.push({ playerId, message: object.kind === "paper" ? "Du kørte ind i en papirbunke!" : "Ramt af en frisbee!", sfx: "hit" });
         if (object.owner !== playerId) events.push({ playerId: object.owner, message: `Ramte ${player.name}!` });
       }
       object.timer = 0;
@@ -458,4 +530,68 @@ function updatePlaces(field: Array<[string, PlayerState]>): void {
     .forEach(([, player], index) => {
       player.place = index + 1;
     });
+}
+
+const wrapAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
+
+// Computerkarts holdes tæt på de menneskelige spillere: kører man fra dem, sætter de farten op, og omvendt.
+function rubberBand(field: Array<[string, PlayerState]>): void {
+  const humans = field.filter(([, player]) => !player.bot && !player.finished);
+  const lead = humans.length ? Math.max(...humans.map(([, player]) => player.progress)) : null;
+  for (const [, player] of field) {
+    if (!player.bot) continue;
+    const gap = lead === null ? 0 : player.progress - lead;
+    player.topScale = player.skill * Math.min(1.1, Math.max(0.9, 1 - gap * 1.2));
+  }
+}
+
+function botInput(player: PlayerState, field: Array<[string, PlayerState]>, dt: number): KartInput {
+  const near = routeFrame(player.routeT + (5 + Math.abs(player.speed) * 0.5) / ROUTE_LENGTH);
+  const target = { x: near.x - near.tz * player.botLane, z: near.z + near.tx * player.botLane };
+  const wanted = headingAlong(target.x - player.x, target.z - player.z);
+  const diff = wrapAngle(wanted - player.heading);
+  const far = routeFrame(player.routeT + 22 / ROUTE_LENGTH);
+  const bend = Math.abs(wrapAngle(headingAlong(far.tx, far.tz) - headingAlong(near.tx, near.tz)));
+
+  let useItem = false;
+  if (player.item && player.itemRoll <= 0) {
+    player.botTimer += dt;
+    const others = field.map(([, other]) => other).filter((other) => other !== player && !other.finished);
+    const alignment = (other: PlayerState): [number, number] => {
+      const dx = other.x - player.x;
+      const dz = other.z - player.z;
+      const distance = Math.hypot(dx, dz) || 1;
+      return [distance, (dx * -Math.sin(player.heading) + dz * -Math.cos(player.heading)) / distance];
+    };
+    const inFront = others.some((other) => {
+      const [distance, dot] = alignment(other);
+      return distance < 40 && dot > 0.93;
+    });
+    const behind = others.some((other) => {
+      const [distance, dot] = alignment(other);
+      return distance < 14 && dot < -0.5;
+    });
+    if (player.item === "coffee") useItem = player.botTimer > 1 && bend < 0.5;
+    else if (player.item === "frisbee") useItem = inFront || player.botTimer > 7;
+    else useItem = (behind && player.botTimer > 1) || player.botTimer > 9;
+    if (useItem) player.botTimer = 0;
+  } else player.botTimer = 0;
+
+  return {
+    throttle: !(bend > 0.8 && player.speed > BASE_SPEED * 0.9),
+    brake: false,
+    steer: diff > 0.05 ? -1 : diff < -0.05 ? 1 : 0,
+    drift: false,
+    useItem,
+  };
+}
+
+// En computerkart, der sidder fast i en væg, sættes tilbage på banen.
+function unstick(player: PlayerState, dt: number): void {
+  if (player.respawn > 0 || player.finished) return;
+  player.stuck = Math.abs(player.speed) < 1.5 ? player.stuck + dt : 0;
+  if (player.stuck > 2) {
+    respawn(player);
+    player.stuck = 0;
+  }
 }

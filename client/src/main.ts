@@ -1,10 +1,11 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
+import { playBeep, playSfx, setEngine, toggleMute, unlockAudio } from "./audio.js";
 import { RaceScene } from "./game.js";
+import { drawMinimap } from "./minimap.js";
 import {
-  BOOST_SPEED, IDLE_INPUT, ITEM_NAMES, createPlayer, createRaceState, prepareRace, resetToLobby, stepRace,
-  type KartInput, type PlayerState, type RaceEvent, type RaceObject, type RaceState,
+  BOOST_SPEED, IDLE_INPUT, MAX_RACERS, addBots, createPlayer, createRaceState, prepareRace, resetToLobby, stepRace,
+  type ItemKind, type KartInput, type PlayerState, type RaceEvent, type RaceObject, type RaceState, type Sfx,
 } from "./race.js";
-import { BASE_SPEED } from "./track.js";
 import "./style.css";
 
 interface RaceResult {
@@ -22,7 +23,7 @@ type PeerMessage =
   | { type: "returnToLobby" }
   | { type: "state"; state: SerializedRaceState }
   | { type: "welcome"; playerId: string }
-  | { type: "toast"; message: string }
+  | { type: "toast"; message: string; sfx?: Sfx }
   | { type: "error"; message: string }
   | { type: "results"; result: RaceResult }
   | { type: "hello"; player: PlayerState };
@@ -32,15 +33,17 @@ interface SerializedRaceState extends Omit<RaceState, "players" | "objects"> {
   objects: Array<[string, RaceObject]>;
 }
 
-const MAX_RACERS = 4;
 const MAX_SPECTATORS = 8;
 const SIMULATION_HZ = 30;
+const MAX_CATCH_UP_STEPS = 10;
 const KART_COLORS: Record<string, string> = {
-  lime: "#d7f36a",
-  clay: "#f28d60",
-  fjord: "#78c8c2",
-  violet: "#b799e8",
+  lime: "#8fe03c",
+  clay: "#ff8a4c",
+  fjord: "#33c9c0",
+  violet: "#a66bff",
 };
+const ITEM_ICONS: Record<ItemKind, string> = { coffee: "☕", paper: "📄", frisbee: "🥏" };
+const ROULETTE_ICONS = Object.values(ITEM_ICONS);
 const RTC_CONFIGURATION: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
@@ -64,6 +67,8 @@ const kartStyleInput = byId<HTMLSelectElement>("kart-style");
 const roomIdInput = byId<HTMLInputElement>("room-id");
 const createButton = byId<HTMLButtonElement>("create-button");
 const soloButton = byId<HTMLButtonElement>("solo-button");
+const trialButton = byId<HTMLButtonElement>("trial-button");
+const botsToggle = byId<HTMLInputElement>("bots-toggle");
 const joinButton = byId<HTMLButtonElement>("join-button");
 const startButton = byId<HTMLButtonElement>("start-button");
 const copyLinkButton = byId<HTMLButtonElement>("copy-link");
@@ -77,6 +82,17 @@ const returnButton = byId<HTMLButtonElement>("return-button");
 const lapElement = byId<HTMLElement>("lap");
 const raceStatus = byId<HTMLElement>("race-status");
 const itemSlot = byId<HTMLElement>("item-slot");
+const itemIcon = byId<HTMLElement>("item-icon");
+const itemCount = byId<HTMLElement>("item-count");
+const itemHint = byId<HTMLElement>("item-hint");
+const placeCard = byId<HTMLElement>("place-card");
+const placeElement = byId<HTMLElement>("place");
+const placeTotal = byId<HTMLElement>("place-total");
+const timerElement = byId<HTMLElement>("timer");
+const countdownElement = byId<HTMLElement>("countdown");
+const speedLines = byId<HTMLElement>("speedlines");
+const controlsHint = byId<HTMLElement>("controls");
+const minimapCanvas = byId<HTMLCanvasElement>("minimap");
 const speedLabel = byId<HTMLElement>("speed");
 const speedFill = byId<HTMLElement>("speed-fill");
 const toast = byId<HTMLElement>("toast");
@@ -88,7 +104,11 @@ let soloMode = false;
 let peerClient: PeerClient | null = null;
 let inputTimer = 0;
 let simulationTimer = 0;
+let lastTick = 0;
+let tickDebt = 0;
 let toastTimer = 0;
+let countdownTimer = 0;
+let lastCountdown = 0;
 let raceState: RaceState | null = null;
 let peer: PeerConnection | null = null;
 const peers = new Map<string, PeerConnection>();
@@ -180,7 +200,7 @@ function renderState(state: RaceState): void {
 
   startButton.classList.toggle("hidden", !isLocalHost);
   startButton.disabled = racers.length === 0 || state.phase !== "lobby";
-  startButton.textContent = racers.length === 1 ? "Start tidskørsel" : "Start løb";
+  startButton.textContent = racers.length === 1 && !botsToggle.checked ? "Start tidskørsel" : "Start løb";
   returnButton.classList.toggle("hidden", !isLocalHost && !soloMode);
   if (state.phase === "lobby") {
     menu.classList.add("hidden");
@@ -188,6 +208,8 @@ function renderState(state: RaceState): void {
     raceHud.classList.add("hidden");
     if (hostMode) syncLobby(state);
     else if (!soloMode) lobbyStatus.textContent = "Forbundet med værten. Venter på, at løbet starter.";
+    setEngine(0, false, true);
+    lastCountdown = 0;
     return;
   }
 
@@ -195,28 +217,85 @@ function renderState(state: RaceState): void {
   raceHud.classList.remove("hidden");
   game?.updatePlayers(players, localSessionId);
   game?.updateObjects(state.objects.entries());
-  lapElement.textContent = racing && me ? `${me.lap} / ${state.laps}` : "LIVE";
+  drawMinimap(minimapCanvas, players, localSessionId);
+  lapElement.textContent = racing && me ? `${me.lap}/${state.laps}` : "LIVE";
+  placeCard.classList.toggle("hidden", !racing || state.timeTrial || state.phase === "countdown");
+  if (me && racing) {
+    placeElement.textContent = `${me.place || "–"}`;
+    placeElement.className = `p${me.place}`;
+    placeTotal.textContent = `/${racers.length}`;
+  }
+  timerElement.textContent = formatTime(state.elapsed);
   const speed = Math.max(0, me?.speed ?? 0);
-  speedLabel.textContent = racing ? `${Math.round((speed / BASE_SPEED) * 100)}` : "—";
+  speedLabel.textContent = racing ? `${Math.round(speed * 5)}` : "—";
   speedFill.style.width = `${Math.min(100, (speed / BOOST_SPEED) * 100)}%`;
-  itemSlot.classList.toggle("hidden", !racing || !me?.item);
-  if (me?.item) itemSlot.textContent = `${ITEM_NAMES[me.item]}${me.itemCount > 1 ? ` ×${me.itemCount}` : ""} · MELLEMRUM`;
+  speedLines.classList.toggle("on", Boolean(racing && me && me.boost > 0));
+  controlsHint.classList.toggle("faded", state.phase === "racing" && state.elapsed > 8);
+  setEngine(me?.speed ?? 0, Boolean(me && me.boost > 0), !racing || state.phase === "results");
+  renderItem(me, racing);
+  renderCountdown(state);
 
-  const prefix = state.timeTrial ? "TIDSKØRSEL · " : "";
   if (state.phase === "countdown") {
-    raceStatus.textContent = `${prefix}STARTER OM ${Math.ceil(state.countdown)}`;
+    raceStatus.textContent = state.timeTrial ? "TIDSKØRSEL" : "GØR KLAR";
   } else if (state.phase === "racing") {
-    let status = state.timeTrial ? `${state.elapsed.toFixed(1)} s` : `${me?.place ?? "–"}. PLADS`;
-    if (me?.finished) status = "I MÅL";
+    let status = state.timeTrial ? "TIDSKØRSEL" : "";
+    if (me?.finished) status = "I MÅL!";
     else if (me?.respawn) status = "SÆTTES TILBAGE PÅ BANEN";
     else if (me?.wrongWay) status = "⟲ FORKERT VEJ";
-    else if (me?.offroad) status += " · I GRÆSSET";
-    raceStatus.textContent = `${prefix}${status}`;
+    raceStatus.textContent = status;
   } else {
-    raceStatus.textContent = `${prefix}LØBET ER SLUT`;
+    raceStatus.textContent = "LØBET ER SLUT";
   }
   raceStatus.classList.toggle("warning", state.phase === "racing" && Boolean(me?.wrongWay && !me.finished));
   renderStandings(racers);
+}
+
+function formatTime(seconds: number): string {
+  const whole = Math.floor(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}.${Math.floor((seconds - whole) * 10)}`;
+}
+
+function renderItem(me: PlayerState | undefined, racing: boolean): void {
+  itemSlot.classList.toggle("hidden", !racing || !me);
+  if (!racing || !me) return;
+  const rolling = me.itemRoll > 0;
+  itemSlot.classList.toggle("rolling", rolling);
+  itemSlot.classList.toggle("empty", !me.item);
+  itemIcon.textContent = rolling
+    ? ROULETTE_ICONS[Math.floor(performance.now() / 90) % ROULETTE_ICONS.length]
+    : me.item ? ITEM_ICONS[me.item] : "";
+  const count = me.item && !rolling && me.itemCount > 1 ? `×${me.itemCount}` : "";
+  itemCount.textContent = count;
+  itemCount.classList.toggle("hidden", !count);
+  itemHint.classList.toggle("hidden", !me.item || rolling);
+}
+
+function flashCountdown(text: string, go: boolean): void {
+  window.clearTimeout(countdownTimer);
+  countdownElement.textContent = text;
+  countdownElement.classList.remove("pop", "go");
+  void countdownElement.offsetWidth;
+  countdownElement.classList.add("pop");
+  countdownElement.classList.toggle("go", go);
+  countdownTimer = window.setTimeout(() => (countdownElement.textContent = ""), 900);
+}
+
+// 3-2-1-KØR! beregnes lokalt af fasen, så gæster ikke skal have beskeder ud over tilstanden.
+function renderCountdown(state: RaceState): void {
+  if (state.phase === "countdown") {
+    const step = Math.ceil(state.countdown);
+    if (step !== lastCountdown) {
+      lastCountdown = step;
+      flashCountdown(String(step), false);
+      playBeep(false);
+    }
+  } else if (lastCountdown !== 0) {
+    lastCountdown = 0;
+    if (state.phase === "racing") {
+      flashCountdown("KØR!", true);
+      playBeep(true);
+    }
+  }
 }
 
 function renderStandings(racers: Array<[string, PlayerState]>): void {
@@ -224,12 +303,19 @@ function renderStandings(racers: Array<[string, PlayerState]>): void {
   standings.replaceChildren();
   sorted.forEach(([id, player], index) => {
     const row = document.createElement("div");
-    row.className = "standing";
+    row.className = id === localSessionId ? "standing me" : "standing";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = player.color;
+    const rank = document.createElement("span");
+    rank.className = "rank";
+    rank.textContent = `${player.place || index + 1}`;
     const name = document.createElement("span");
-    name.textContent = `${player.place || index + 1}. ${player.name}${id === localSessionId ? " (dig)" : ""}`;
-    const distance = document.createElement("small");
-    distance.textContent = player.finished ? "MÅL" : `OMG. ${player.lap}`;
-    row.append(name, distance);
+    name.className = "who";
+    name.textContent = player.name;
+    const progress = document.createElement("small");
+    progress.textContent = player.finished ? "MÅL" : `${player.lap}`;
+    row.append(rank, dot, name, progress);
     standings.appendChild(row);
   });
   if (!sorted.length) {
@@ -271,10 +357,12 @@ function publishState(): void {
 
 function deliverEvents(events: RaceEvent[]): void {
   for (const event of events) {
-    if (event.playerId === localSessionId) showToast(event.message);
-    else {
+    if (event.playerId === localSessionId) {
+      if (event.message) showToast(event.message);
+      if (event.sfx) playSfx(event.sfx);
+    } else {
       const recipient = peers.get(event.playerId);
-      if (recipient) sendToPeer(recipient, { type: "toast", message: event.message });
+      if (recipient) sendToPeer(recipient, { type: "toast", message: event.message, sfx: event.sfx });
     }
   }
 }
@@ -337,7 +425,7 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
       }
       return;
     }
-    if (message.type === "start" && source.playerId === raceState.hostId) startRace();
+    if (message.type === "start" && source.playerId === raceState.hostId) startRace(botsToggle.checked);
     if (message.type === "returnToLobby" && source.playerId === raceState.hostId) returnToLobby();
     return;
   }
@@ -353,7 +441,10 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
     raceState = deserializeState(message.state);
     renderState(raceState);
   }
-  if (message.type === "toast") showToast(message.message);
+  if (message.type === "toast") {
+    if (message.message) showToast(message.message);
+    if (message.sfx) playSfx(message.sfx);
+  }
   if (message.type === "results") renderResults(message.result);
 }
 
@@ -395,6 +486,7 @@ function showLobby(): void {
 }
 
 function createRoom(): void {
+  unlockAudio();
   const name = safeName();
   if (!name) {
     showError("Skriv et kaldenavn på 1–20 tegn.");
@@ -437,6 +529,7 @@ function createRoom(): void {
 }
 
 function joinRoom(): void {
+  unlockAudio();
   const name = safeName();
   if (!name) {
     showError("Skriv et kaldenavn på 1–20 tegn.");
@@ -491,12 +584,15 @@ function startInputUpdates(): void {
   }, 50);
 }
 
-function startRace(): void {
+function startRace(withBots: boolean): void {
   if (!raceState || !isHost || raceState.phase !== "lobby") return;
+  if (withBots) addBots(raceState);
   prepareRace(raceState);
-  for (const [id, player] of raceState.players) if (player.role === "racer") playerInputs.set(id, { ...IDLE_INPUT });
+  for (const [id, player] of raceState.players) if (player.role === "racer" && !player.bot) playerInputs.set(id, { ...IDLE_INPUT });
   resultsPanel.classList.add("hidden");
   window.clearInterval(simulationTimer);
+  lastTick = performance.now();
+  tickDebt = 0;
   simulationTimer = window.setInterval(updateRace, 1000 / SIMULATION_HZ);
   publishState();
 }
@@ -526,7 +622,19 @@ function updateRace(): void {
   const state = raceState;
   if (!state || !isHost) return;
   if (state.players.get(localSessionId)?.role === "racer") playerInputs.set(localSessionId, takeInput());
-  const { events, done } = stepRace(state, playerInputs, 1 / SIMULATION_HZ);
+  // Kører en fane langsomt (tung tegning, baggrundsfane), indhentes tabte skridt, så løbet følger uret.
+  const now = performance.now();
+  tickDebt = Math.min(tickDebt + (now - lastTick) / 1000, MAX_CATCH_UP_STEPS / SIMULATION_HZ);
+  lastTick = now;
+  const events: RaceEvent[] = [];
+  let done = false;
+  while (tickDebt >= 1 / SIMULATION_HZ && !done) {
+    const step = stepRace(state, playerInputs, 1 / SIMULATION_HZ);
+    events.push(...step.events);
+    done = step.done;
+    tickDebt -= 1 / SIMULATION_HZ;
+    if (state.players.get(localSessionId)?.role === "racer") playerInputs.set(localSessionId, readInput());
+  }
   deliverEvents(events);
   if (done) finishRace();
   else publishState();
@@ -539,8 +647,9 @@ function returnToLobby(): void {
   publishState();
 }
 
-// Solo er en tidskørsel: samme simulering som værten, bare uden netværk.
-function startSoloTimeTrial(): void {
+// Solo bruger samme simulering som værten, bare uden netværk: enten mod computerkarts eller som tidskørsel.
+function startSolo(withBots: boolean): void {
+  unlockAudio();
   const name = safeName();
   if (!name) {
     showError("Skriv et kaldenavn på 1–20 tegn.");
@@ -558,7 +667,7 @@ function startSoloTimeTrial(): void {
   lobby.classList.add("hidden");
   raceHud.classList.remove("hidden");
   game = new RaceScene(document.body, localSessionId);
-  startRace();
+  startRace(withBots);
 }
 
 function leaveSession(): void {
@@ -571,6 +680,10 @@ function leaveSession(): void {
 }
 
 function resetSession(): void {
+  window.clearTimeout(countdownTimer);
+  countdownElement.textContent = "";
+  lastCountdown = 0;
+  setEngine(0, false, true);
   window.clearInterval(inputTimer);
   window.clearInterval(simulationTimer);
   heldKeys.clear();
@@ -598,7 +711,8 @@ createButton.addEventListener("click", (event) => {
 });
 joinButton.addEventListener("click", () => void joinRoom());
 startButton.addEventListener("click", () => {
-  if (isHost) startRace();
+  unlockAudio();
+  if (isHost) startRace(botsToggle.checked);
   else if (peer) sendToPeer(peer, { type: "start" });
 });
 byId<HTMLButtonElement>("leave-button").addEventListener("click", leaveSession);
@@ -607,7 +721,11 @@ returnButton.addEventListener("click", () => {
   else if (isHost) returnToLobby();
   else if (peer) sendToPeer(peer, { type: "returnToLobby" });
 });
-soloButton.addEventListener("click", startSoloTimeTrial);
+soloButton.addEventListener("click", () => startSolo(true));
+trialButton.addEventListener("click", () => startSolo(false));
+botsToggle.addEventListener("change", () => {
+  if (raceState) renderState(raceState);
+});
 copyLinkButton.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(inviteLink.textContent ?? "");
@@ -620,6 +738,7 @@ window.addEventListener("keydown", (event) => {
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) return;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
+  if (event.code === "KeyM" && !event.repeat) showToast(toggleMute() ? "Lyd slået fra" : "Lyd slået til");
   if (event.code === "Space" && !event.repeat) itemPressed = true;
   heldKeys.add(event.code);
 });
@@ -627,4 +746,16 @@ window.addEventListener("keyup", (event) => heldKeys.delete(event.code));
 window.addEventListener("blur", () => heldKeys.clear());
 
 // Kun i udvikling: giver automatiske browsertests adgang til løbstilstanden.
-if (import.meta.env.DEV) Object.assign(window, { auRace: { state: () => raceState, me: () => localSessionId } });
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    auRace: {
+      state: () => raceState,
+      me: () => localSessionId,
+      // Lader computerstyringen køre den lokale kart, så løbet kan afprøves uden tastatur.
+      autopilot: (on: boolean) => {
+        const player = raceState?.players.get(localSessionId);
+        if (player) player.bot = on;
+      },
+    },
+  });
+}

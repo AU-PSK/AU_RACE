@@ -28,23 +28,25 @@ Venner åbner linket, vælger kaldenavn og trykker **Deltag i løb**.
 
 ## Sådan spiller du
 
-Skriv et kaldenavn og vælg **Spil solo på tid** for at køre alene.
+Skriv et kaldenavn og vælg **Kør mod computeren** for et løb mod tre computerkarts, eller
+**Tidskørsel alene** for at jagte tiden.
 For multiplayer vælg **Opret peer-to-peer-løb**. Del invitationslinket fra
 lobbyen; hver gæst åbner linket, vælger kaldenavn, racer/tilskuer og kartfarve
 og trykker **Deltag i løb**. Værten starter løbet og skal blive online.
 
 Kør med **W / ↑**, brems og bak med **S / ↓**, og styr frit med **A / D / ← / →**.
 Hold **Shift** nede, mens du styrer, for at drifte: jo længere drift, jo større
-turbo bagefter (gnisterne skifter fra hvid til blå til orange). Brug en bonus med
-**Mellemrum**.
+turbo bagefter (gnisterne skifter fra hvid til blå, orange og lilla). Brug en bonus med
+**Mellemrum**; **M** slår lyden til og fra. Gule pile på vejen er boost-pads.
 
 Du kan køre ud i græsset og mellem træerne, men det går langsomt, og bygninger og
 træer stopper dig. Kører du i søen eller for langt væk, sættes du tilbage på
 banen. Gas lige efter "2" i nedtællingen giver raketstart.
 
 Bonuskasser på banen giver Kaffeboost (fart), Papirbunke (smides bag dig) eller
-Frisbee (affyres frem); jo længere bagude, jo oftere får du fart. Solo er en
-tidskørsel med tre kaffeboosts.
+Frisbee (affyres frem); jo længere bagude, jo oftere får du fart. Computerkartene
+holder sig tæt på dig, så løbet bliver spændende, og de fylder op til fire racere.
+Tidskørsel er uden bonuskasser, men med tre kaffeboosts.
 
 ## Bane og omgivelser
 
