@@ -350,9 +350,26 @@ export class RaceScene {
       context.fillRect(0, 0, 64, 64);
       context.fillRect(64, 64, 64, 64);
     });
-    grassTexture.repeat.set(2400 / 20, 2400 / 20);
-    // Omlandet uden for højdedataene: en flad plan lige under terrænets kant.
-    const outer = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshLambertMaterial({ map: grassTexture }));
+    // ShapeGeometry har UV i verdensenheder, så én teksturperiode pr. 20 enheder.
+    grassTexture.repeat.set(1 / 20, 1 / 20);
+    // Omlandet uden for højdedataene: en flad plan lige under terrænets kant. Der er et hul over terrænet, ellers dækker planen alt lavere end y=-0.12 (udgravet vej, dale).
+    const half = 1200;
+    const hole = 0.5;
+    const outline = new THREE.Shape();
+    outline.moveTo(-half, -half);
+    outline.lineTo(half, -half);
+    outline.lineTo(half, half);
+    outline.lineTo(-half, half);
+    outline.closePath();
+    // Planen roteres -90° om x, så formens y svarer til -z.
+    const cutout = new THREE.Path();
+    cutout.moveTo(terrainBounds.minX + hole, -(terrainBounds.minZ + hole));
+    cutout.lineTo(terrainBounds.minX + hole, -(terrainBounds.maxZ - hole));
+    cutout.lineTo(terrainBounds.maxX - hole, -(terrainBounds.maxZ - hole));
+    cutout.lineTo(terrainBounds.maxX - hole, -(terrainBounds.minZ + hole));
+    cutout.closePath();
+    outline.holes.push(cutout);
+    const outer = new THREE.Mesh(new THREE.ShapeGeometry(outline), new THREE.MeshLambertMaterial({ map: grassTexture }));
     outer.rotation.x = -Math.PI / 2;
     outer.position.y = -0.12;
     outer.receiveShadow = true;
