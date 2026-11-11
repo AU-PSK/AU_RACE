@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { campus } from "./campus-data.js";
 import { selectedInstitute } from "./institutes.js";
 import { DRIFT_LEVELS, type PlayerState, type RaceObject } from "./race.js";
@@ -73,6 +74,11 @@ export class RaceScene {
   private sun: THREE.DirectionalLight;
   private clouds = new THREE.Group();
   private buildingLabels = new Map<string, THREE.Sprite>();
+  private tmpForward = new THREE.Vector3();
+  private tmpRight = new THREE.Vector3();
+  private tmpTarget = new THREE.Vector3();
+  private tmpEye = new THREE.Vector3();
+  private tmpLook = new THREE.Vector3();
   private gradient = toonGradient();
   private padTexture: THREE.CanvasTexture;
   private boxMaterial: THREE.MeshBasicMaterial;
@@ -642,6 +648,8 @@ export class RaceScene {
       (color) => this.toon(color, { map: windows }),
     );
     const highlighted = selectedInstitute()?.building;
+    // Bygninger med samme materialer slås sammen til ét mesh for at spare draw calls.
+    const buildingGeometries = new Map<number, THREE.BufferGeometry[]>();
     campus.buildings.forEach((building, index) => {
       // Soklen følger det laveste terræn under fodaftrykket; væggene forlænges, så de når ned til det.
       let low = Infinity;
@@ -664,15 +672,17 @@ export class RaceScene {
       const centerGround = terrainHeightAt(sumX / count, sumZ / count);
       low = Math.min(low, centerGround);
       high = Math.max(high, centerGround);
-      const mesh = new THREE.Mesh(
-        new THREE.ExtrudeGeometry(toShape(building.p), { depth: building.h + (high - low) + 0.05, bevelEnabled: false }),
-        [roofs[index % roofs.length], walls[(index * 7) % walls.length]],
-      );
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = low - 0.05;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.scene.add(mesh);
+      const geometry = new THREE.ExtrudeGeometry(toShape(building.p), {
+        depth: building.h + (high - low) + 0.05,
+        bevelEnabled: false,
+      });
+      geometry.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2).setPosition(0, low - 0.05, 0));
+      const roofIndex = index % roofs.length;
+      const wallIndex = (index * 7) % walls.length;
+      const key = roofIndex * walls.length + wallIndex;
+      const group = buildingGeometries.get(key);
+      if (group) group.push(geometry);
+      else buildingGeometries.set(key, [geometry]);
       if (building.n) {
         const label = this.createTextSprite(building.n, building.n === highlighted ? "#ffd23f" : "#e9ecd9");
         label.position.set(sumX / count, high + building.h + 2.2, sumZ / count);
@@ -680,6 +690,15 @@ export class RaceScene {
         this.buildingLabels.set(building.n, label);
       }
     });
+    for (const [key, geometries] of buildingGeometries) {
+      const merged = mergeGeometries(geometries, true);
+      for (const geometry of geometries) geometry.dispose();
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, [roofs[Math.floor(key / walls.length)], walls[key % walls.length]]);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    }
 
     this.addTrees();
   }
@@ -1058,22 +1077,23 @@ export class RaceScene {
     if (focusKart) {
       const position = focusKart.root.position;
       const data = focusKart.target;
-      const forward = new THREE.Vector3(-Math.sin(focusKart.heading), 0, -Math.cos(focusKart.heading));
-      const right = new THREE.Vector3(Math.cos(focusKart.heading), 0, -Math.sin(focusKart.heading));
+      const forward = this.tmpForward.set(-Math.sin(focusKart.heading), 0, -Math.cos(focusKart.heading));
+      const right = this.tmpRight.set(Math.cos(focusKart.heading), 0, -Math.sin(focusKart.heading));
       const speedRatio = Math.min(1.7, Math.max(0, data.speed) / BASE_SPEED);
       const distance = 7.2 + speedRatio * 0.9;
-      const target = position.clone()
+      const target = this.tmpTarget.copy(position)
         .addScaledVector(forward, -distance)
-        .addScaledVector(right, -focusKart.slide * 3.2)
-        .add(new THREE.Vector3(0, 3.7 + speedRatio * 0.3, 0));
+        .addScaledVector(right, -focusKart.slide * 3.2);
+      target.y += 3.7 + speedRatio * 0.3;
       // Ligger kameraet inde i en bygning, trækkes det ind mod karten, til det er frit igen.
-      const eye = target.clone();
+      const eye = this.tmpEye.copy(target);
       for (let fraction = 1; fraction > 0.3; fraction -= 0.1) {
         eye.lerpVectors(position, target, fraction);
         if (!buildingColliders.some((building) => pointInPolygon(building, eye.x, eye.z))) break;
       }
       // Kameraet må ikke ligge under terrænet, og terrænet må ikke skygge for sigtelinjen til karten (fx over en bakketop).
-      const lookTarget = position.clone().add(new THREE.Vector3(0, 1.2, 0));
+      const lookTarget = this.tmpLook.copy(position);
+      lookTarget.y += 1.2;
       eye.y = Math.max(eye.y, terrainHeightAt(eye.x, eye.z) + 1.4);
       for (let fraction = 0.1; fraction < 0.95; fraction += 0.1) {
         const sx = eye.x + (lookTarget.x - eye.x) * fraction;
@@ -1084,8 +1104,12 @@ export class RaceScene {
       this.camera.position.lerp(eye, 1 - Math.exp(-delta * 8));
       const floor = terrainHeightAt(this.camera.position.x, this.camera.position.z) + 1.2;
       if (this.camera.position.y < floor) this.camera.position.y = floor;
-      if (data.boost > 0) this.camera.position.add(new THREE.Vector3((Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.08, 0));
-      const look = position.clone().addScaledVector(forward, 7).add(new THREE.Vector3(0, 1.2, 0));
+      if (data.boost > 0) {
+        this.camera.position.x += (Math.random() - 0.5) * 0.08;
+        this.camera.position.y += (Math.random() - 0.5) * 0.08;
+      }
+      const look = this.tmpLook.copy(position).addScaledVector(forward, 7);
+      look.y += 1.2;
       this.camera.lookAt(look);
       // Synsfeltet udvides med farten og i boost; det giver fornemmelsen af fart.
       const wantedFov = 60 + Math.min(1, speedRatio) * 4 + (data.boost > 0 ? 12 : 0);
@@ -1094,7 +1118,10 @@ export class RaceScene {
       this.camera.updateProjectionMatrix();
       // Skyggekortet følger kartet, så skyggerne er skarpe, uanset hvor på banen man er.
       this.sun.target.position.copy(position);
-      this.sun.position.copy(position).add(new THREE.Vector3(-36, 56, 30));
+      this.sun.position.copy(position);
+      this.sun.position.x -= 36;
+      this.sun.position.y += 56;
+      this.sun.position.z += 30;
     }
     this.clouds.position.set(this.camera.position.x, 0, this.camera.position.z);
     this.renderer.render(this.scene, this.camera);
