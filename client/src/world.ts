@@ -27,6 +27,7 @@ function toPolygon(flat: number[]): Polygon {
 
 export const buildingColliders = campus.buildings.map((building) => toPolygon(building.p));
 export const waterAreas = campus.water.map(toPolygon);
+export const islandAreas = campus.islands.map(toPolygon);
 
 export function pointInPolygon(polygon: Polygon, x: number, z: number): boolean {
   if (x < polygon.minX || x > polygon.maxX || z < polygon.minZ || z > polygon.maxZ) return false;

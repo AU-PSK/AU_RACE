@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { campus } from "./campus-data.js";
+import { selectedInstitute } from "./institutes.js";
 import { DRIFT_LEVELS, type PlayerState, type RaceObject } from "./race.js";
 import { roadWeightAt, terrainBounds, terrainFrame, terrainHeightAt, terrainStep } from "./terrain.js";
 import { BASE_SPEED, route, ROUTE_LENGTH, TRACK_WIDTH } from "./track.js";
@@ -458,6 +459,7 @@ export class RaceScene {
       fill("#5cc85a", campus.pitches);
       fill("#4eb04a", campus.forests);
       fill("#3fb7f2", campus.water);
+      fill("#8fdb62", campus.islands);
       context.strokeStyle = "#3fb7f2";
       context.lineWidth = 0.9 * pixelsPerUnit;
       context.lineCap = "round";
@@ -634,10 +636,11 @@ export class RaceScene {
       context.fillRect(0, 56, 64, 8);
     });
     windows.repeat.set(1 / 1.7, 1 / 1.05);
-    const roofs = ["#c8553d", "#8aa0b4", "#b9784f"].map((color) => this.toon(color));
-    const walls = ["#ffd98a", "#ffb067", "#f09a8c", "#f7eed4", "#b4dcea", "#cdb4e8"].map(
+    const roofs = ["#a8442f", "#7f8f9e", "#9c6a45"].map((color) => this.toon(color));
+    const walls = ["#f2c230", "#e8b52a", "#f7d04a", "#ecbd38", "#f4c94f"].map(
       (color) => this.toon(color, { map: windows }),
     );
+    const highlighted = selectedInstitute()?.building;
     campus.buildings.forEach((building, index) => {
       // Soklen følger det laveste terræn under fodaftrykket; væggene forlænges, så de når ned til det.
       let low = Infinity;
@@ -670,7 +673,7 @@ export class RaceScene {
       mesh.receiveShadow = true;
       this.scene.add(mesh);
       if (building.n) {
-        const label = this.createTextSprite(building.n, "#e9ecd9");
+        const label = this.createTextSprite(building.n, building.n === highlighted ? "#ffd23f" : "#e9ecd9");
         label.position.set(sumX / count, high + building.h + 2.2, sumZ / count);
         this.scene.add(label);
       }

@@ -16,6 +16,7 @@ out geom;`,
 (
   way["building"](${areaBox});
   way["natural"="water"](${areaBox});
+  relation["natural"="water"](${areaBox});
   way["waterway"](${areaBox});
   way["leisure"~"^(park|pitch|garden)$"](${areaBox});
   way["landuse"="forest"](${areaBox});
