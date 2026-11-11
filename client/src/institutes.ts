@@ -10,6 +10,18 @@ export const INSTITUTES: readonly { id: string; name: string; building?: string 
 ];
 
 export function selectedInstitute(): (typeof INSTITUTES)[number] | undefined {
-  const id = localStorage.getItem(INSTITUTE_STORAGE_KEY);
-  return INSTITUTES.find((institute) => institute.id === id);
+  try {
+    const id = localStorage.getItem(INSTITUTE_STORAGE_KEY);
+    return INSTITUTES.find((institute) => institute.id === id);
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveInstitute(id: string): void {
+  try {
+    localStorage.setItem(INSTITUTE_STORAGE_KEY, id);
+  } catch {
+    // Lagring er ikke tilgængelig (fx privat tilstand); valget gælder kun denne session.
+  }
 }

@@ -1,7 +1,7 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
 import { playBeep, playSfx, setEngine, toggleMute, unlockAudio } from "./audio.js";
 import { RaceScene } from "./game.js";
-import { INSTITUTES, INSTITUTE_STORAGE_KEY, selectedInstitute } from "./institutes.js";
+import { INSTITUTES, saveInstitute, selectedInstitute } from "./institutes.js";
 import { drawMinimap } from "./minimap.js";
 import {
   BOOST_SPEED, IDLE_INPUT, MAX_RACERS, addBots, createPlayer, createRaceState, prepareRace, resetToLobby, stepRace,
@@ -68,7 +68,10 @@ const kartStyleInput = byId<HTMLSelectElement>("kart-style");
 const instituteInput = byId<HTMLSelectElement>("institute");
 for (const institute of INSTITUTES) instituteInput.add(new Option(institute.name, institute.id));
 instituteInput.value = selectedInstitute()?.id ?? "";
-instituteInput.addEventListener("change", () => localStorage.setItem(INSTITUTE_STORAGE_KEY, instituteInput.value));
+instituteInput.addEventListener("change", () => {
+  saveInstitute(instituteInput.value);
+  game?.refreshInstituteHighlight();
+});
 const roomIdInput = byId<HTMLInputElement>("room-id");
 const createButton = byId<HTMLButtonElement>("create-button");
 const soloButton = byId<HTMLButtonElement>("solo-button");
@@ -236,7 +239,7 @@ function renderState(state: RaceState): void {
   speedFill.style.width = `${Math.min(100, (speed / BOOST_SPEED) * 100)}%`;
   speedLines.classList.toggle("on", Boolean(racing && me && me.boost > 0));
   controlsHint.classList.toggle("faded", state.phase === "racing" && state.elapsed > 8);
-  setEngine(me?.speed ?? 0, Boolean(me && me.boost > 0), !racing || state.phase === "results");
+  setEngine(me?.speed ?? 0, Boolean(me && me.boost > 0), !racing || state.phase === "results", Boolean(me && me.driftDir !== 0));
   renderItem(me, racing);
   renderCountdown(state);
 

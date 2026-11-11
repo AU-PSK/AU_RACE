@@ -29,6 +29,17 @@ export const buildingColliders = campus.buildings.map((building) => toPolygon(bu
 export const waterAreas = campus.water.map(toPolygon);
 export const islandAreas = campus.islands.map(toPolygon);
 
+// Hver ø hører kun til de søer, den ligger i, så den ikke gør overlappende vand andre steder kørbart.
+const waterHoles = waterAreas.map((water) =>
+  islandAreas.filter((island) => pointInPolygon(water, island.points[0], island.points[1])),
+);
+
+export function isInWater(x: number, z: number): boolean {
+  return waterAreas.some(
+    (water, i) => pointInPolygon(water, x, z) && !waterHoles[i].some((island) => pointInPolygon(island, x, z)),
+  );
+}
+
 export function pointInPolygon(polygon: Polygon, x: number, z: number): boolean {
   if (x < polygon.minX || x > polygon.maxX || z < polygon.minZ || z > polygon.maxZ) return false;
   const flat = polygon.points;

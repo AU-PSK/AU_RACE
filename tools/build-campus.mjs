@@ -158,6 +158,8 @@ function relationRings(relation, role) {
       const points = current.map(project);
       points.pop();
       rings.push(flat(points));
+    } else {
+      console.warn(`Advarsel: relation ${relation.id} har en uafsluttet ${role}-ring, som springes over.`);
     }
   }
   return rings;

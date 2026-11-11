@@ -72,6 +72,7 @@ export class RaceScene {
   private focusKart: KartMesh | null = null;
   private sun: THREE.DirectionalLight;
   private clouds = new THREE.Group();
+  private buildingLabels = new Map<string, THREE.Sprite>();
   private gradient = toonGradient();
   private padTexture: THREE.CanvasTexture;
   private boxMaterial: THREE.MeshBasicMaterial;
@@ -676,6 +677,7 @@ export class RaceScene {
         const label = this.createTextSprite(building.n, building.n === highlighted ? "#ffd23f" : "#e9ecd9");
         label.position.set(sumX / count, high + building.h + 2.2, sumZ / count);
         this.scene.add(label);
+        this.buildingLabels.set(building.n, label);
       }
     });
 
@@ -711,7 +713,27 @@ export class RaceScene {
     this.scene.add(trunks, crowns, tops);
   }
 
+  // Opdaterer fremhævningen af institutbygningen, når brugeren skifter institut efter scenen er bygget.
+  refreshInstituteHighlight(): void {
+    const highlighted = selectedInstitute()?.building;
+    for (const [name, sprite] of this.buildingLabels) {
+      const material = sprite.material as THREE.SpriteMaterial;
+      material.map?.dispose();
+      material.map = this.labelTexture(name, name === highlighted ? "#ffd23f" : "#e9ecd9");
+      material.needsUpdate = true;
+    }
+  }
+
   private createTextSprite(text: string, color: string): THREE.Sprite {
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: this.labelTexture(text, color), transparent: true, depthWrite: false }),
+    );
+    sprite.userData.label = true;
+    sprite.scale.set(7, 1.3, 1);
+    return sprite;
+  }
+
+  private labelTexture(text: string, color: string): THREE.CanvasTexture {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 96;
@@ -727,12 +749,7 @@ export class RaceScene {
       context.textBaseline = "middle";
       context.fillText(text, 256, 50, 480);
     }
-    const sprite = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }),
-    );
-    sprite.userData.label = true;
-    sprite.scale.set(7, 1.3, 1);
-    return sprite;
+    return new THREE.CanvasTexture(canvas);
   }
 
   private wheelPart(radius: number, width: number, material: THREE.Material, hub: THREE.Material): THREE.Mesh {
