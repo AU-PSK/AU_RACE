@@ -21,6 +21,8 @@ export interface PlayerState {
   name: string;
   role: "racer" | "spectator";
   color: string;
+  /** Institut-id (se institutes.ts); tom streng, hvis ingen er valgt. */
+  institute: string;
   host: boolean;
   x: number;
   z: number;
@@ -131,9 +133,9 @@ const PAD_OFFSETS = [-1.3, 1.3];
 const BOT_SKILLS = [0.93, 0.9, 0.96, 0.88];
 const TIME_TRIAL_COFFEES = 3;
 
-export function createPlayer(name: string, role: "racer" | "spectator", color: string): PlayerState {
+export function createPlayer(name: string, role: "racer" | "spectator", color: string, institute = ""): PlayerState {
   return {
-    name, role, color, host: false,
+    name, role, color, institute, host: false,
     x: 0, z: 0, heading: 0, speed: 0,
     progress: 0, routeT: 0, safeT: 0, lap: 1, place: 0, finished: false, finishTime: 0,
     item: null, itemCount: 0, boost: 0, driftDir: 0, driftCharge: 0, spin: 0, respawn: 0,
@@ -169,7 +171,7 @@ export function prepareRace(state: RaceState): void {
     const t = 1 - 0.006 - Math.floor(index / 2) * 0.011;
     const side = index % 2 === 0 ? -1 : 1;
     const frame = routeFrame(t);
-    Object.assign(player, createPlayer(player.name, player.role, player.color), {
+    Object.assign(player, createPlayer(player.name, player.role, player.color, player.institute), {
       host: player.host, bot: player.bot, skill: player.skill, botLane: player.botLane,
       x: frame.x - frame.tz * side * 1.5,
       z: frame.z + frame.tx * side * 1.5,
@@ -209,7 +211,7 @@ export function resetToLobby(state: RaceState): void {
   state.objects.clear();
   for (const [id, player] of state.players) {
     if (player.bot) state.players.delete(id);
-    else Object.assign(player, createPlayer(player.name, player.role, player.color), { host: player.host });
+    else Object.assign(player, createPlayer(player.name, player.role, player.color, player.institute), { host: player.host });
   }
 }
 

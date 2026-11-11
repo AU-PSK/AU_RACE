@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { mergeByMaterial } from "./geometry.js";
 import { campus } from "./campus-data.js";
-import { selectedInstitute } from "./institutes.js";
+import { playerLabel, selectedInstitute } from "./institutes.js";
 import { DRIFT_LEVELS, type PlayerState, type RaceObject } from "./race.js";
 import { roadWeightAt, terrainBounds, terrainFrame, terrainHeightAt, terrainStep } from "./terrain.js";
 import { BASE_SPEED, route, ROUTE_LENGTH, TRACK_WIDTH } from "./track.js";
@@ -181,8 +181,8 @@ export class RaceScene {
         kart = this.createKart(data);
         this.karts.set(id, kart);
         this.scene.add(kart.root);
-      } else if (kart.name !== data.name) {
-        this.updateNameLabel(kart, data.name);
+      } else if (kart.name !== playerLabel(data)) {
+        this.updateNameLabel(kart, playerLabel(data));
       }
       // Store spring (genstart på banen) tages med det samme i stedet for at glide hen over græsset.
       if (Math.hypot(kart.root.position.x - data.x, kart.root.position.z - data.z) > 12) {
@@ -785,7 +785,8 @@ export class RaceScene {
 
   // root bærer position og kørselsretning (dem følger kameraet); body bærer drift-skrid, læning og spin.
   private createKart(data: PlayerState): KartMesh {
-    const { color, name } = data;
+    const { color } = data;
+    const name = playerLabel(data);
     const root = new THREE.Group();
     const body = new THREE.Group();
     body.scale.setScalar(KART_SCALE);

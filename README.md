@@ -52,8 +52,9 @@ Venner åbner linket, vælger kaldenavn og trykker **Deltag i løb**.
 Skriv et kaldenavn og vælg **Kør mod computeren** for et løb mod tre computerkarts, eller
 **Tidskørsel alene** for at jagte tiden.
 For multiplayer vælg **Opret peer-to-peer-løb**. Del invitationslinket fra
-lobbyen; hver gæst åbner linket, vælger kaldenavn, racer/tilskuer og kartfarve
-og trykker **Deltag i løb**. Værten starter løbet og skal blive online.
+lobbyen; hver gæst åbner linket, vælger kaldenavn, racer/tilskuer og institut
+og trykker **Deltag i løb**. Instituttet vises efter navnet (fx "Anna · Biomedicin")
+og bestemmer kartfarven. Værten starter løbet og skal blive online.
 
 Kør med **W / ↑**, brems og bak med **S / ↓**, og styr frit med **A / D / ← / →**.
 Hold **Shift** nede, mens du styrer, for at drifte: jo længere drift, jo større
@@ -111,7 +112,7 @@ Vejen er flad på tværs og følger en udglattet højdeprofil langs midterlinjen
 - WebRTC bruger en offentlig STUN-tjeneste. Der er ingen TURN-relay, så
   direkte forbindelser kan fejle på nogle netværk.
 - Three.js-scene i browseren og værtsstyrede bevægelsesopdateringer.
-- Fire originale kosmetiske kartfarver uden forskel i styring.
+- Kartfarven følger det valgte institut (kosmetisk, uden forskel i styring); navnet vises med institut.
 - Kaldenavne og resultater gemmes kun i rummet; ingen konti eller global
   rekordliste.
 
