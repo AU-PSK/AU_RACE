@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { mergeByMaterial } from "./geometry.js";
 import { campus } from "./campus-data.js";
 import { selectedInstitute } from "./institutes.js";
 import { DRIFT_LEVELS, type PlayerState, type RaceObject } from "./race.js";
@@ -691,7 +691,7 @@ export class RaceScene {
       }
     });
     for (const [key, geometries] of buildingGeometries) {
-      const merged = mergeGeometries(geometries, true);
+      const merged = mergeByMaterial(geometries, 2);
       for (const geometry of geometries) geometry.dispose();
       if (!merged) continue;
       const mesh = new THREE.Mesh(merged, [roofs[Math.floor(key / walls.length)], walls[key % walls.length]]);
