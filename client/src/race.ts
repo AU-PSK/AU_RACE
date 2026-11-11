@@ -1,5 +1,5 @@
 import { BASE_SPEED, ROUTE_LENGTH, TRACK_WIDTH } from "./track.js";
-import { nearestRouteT, pointInPolygon, resolveWorldCollision, routeFrame, waterAreas } from "./world.js";
+import { islandAreas, nearestRouteT, pointInPolygon, resolveWorldCollision, routeFrame, waterAreas } from "./world.js";
 
 // Løbssimuleringen. Værten (eller solo-spilleren) kører den; gæster modtager kun resultatet.
 // Retning: heading 0 peger mod -z, og fremad er (-sin heading, -cos heading).
@@ -305,7 +305,10 @@ function stepKart(state: RaceState, id: string, player: PlayerState, input: Kart
     endDrift(player, false);
   }
 
-  if (waterAreas.some((area) => pointInPolygon(area, player.x, player.z))) {
+  if (
+    waterAreas.some((area) => pointInPolygon(area, player.x, player.z)) &&
+    !islandAreas.some((area) => pointInPolygon(area, player.x, player.z))
+  ) {
     respawn(player);
     events.push({ playerId: id, message: "Plask! Du kørte i søen og bliver sat tilbage på banen.", sfx: "fall" });
     return;
