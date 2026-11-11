@@ -1,7 +1,7 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
 import { playBeep, playSfx, setEngine, toggleMute, unlockAudio } from "./audio.js";
 import type { RaceScene } from "./game.js";
-import { INSTITUTES, saveInstitute, selectedInstitute } from "./institutes.js";
+import { INSTITUTES, NO_INSTITUTE_COLOR, instituteById, playerLabel, saveInstitute, selectedInstitute } from "./institutes.js";
 import { drawMinimap } from "./minimap.js";
 import {
   BOOST_SPEED, IDLE_INPUT, MAX_RACERS, addBots, createPlayer, createRaceState, prepareRace, resetToLobby, stepRace,
@@ -37,12 +37,6 @@ interface SerializedRaceState extends Omit<RaceState, "players" | "objects"> {
 const MAX_SPECTATORS = 8;
 const SIMULATION_HZ = 30;
 const MAX_CATCH_UP_STEPS = 10;
-const KART_COLORS: Record<string, string> = {
-  lime: "#8fe03c",
-  clay: "#ff8a4c",
-  fjord: "#33c9c0",
-  violet: "#a66bff",
-};
 const ITEM_ICONS: Record<ItemKind, string> = { coffee: "☕", paper: "📄", frisbee: "🥏" };
 const ROULETTE_ICONS = Object.values(ITEM_ICONS);
 // TURN er valgfri: sæt VITE_TURN_URL (og evt. VITE_TURN_USERNAME / VITE_TURN_CREDENTIAL) ved build.
@@ -78,7 +72,6 @@ const raceHud = byId<HTMLElement>("race-hud");
 const errorElement = byId<HTMLElement>("error");
 const nicknameInput = byId<HTMLInputElement>("nickname");
 const roleInput = byId<HTMLSelectElement>("role");
-const kartStyleInput = byId<HTMLSelectElement>("kart-style");
 const instituteInput = byId<HTMLSelectElement>("institute");
 for (const institute of INSTITUTES) instituteInput.add(new Option(institute.name, institute.id));
 instituteInput.value = selectedInstitute()?.id ?? "";
@@ -158,8 +151,9 @@ function safeName(): string {
   return nicknameInput.value.trim().replace(/\s+/g, " ").slice(0, 20);
 }
 
-function makePlayer(name: string, role: "racer" | "spectator", kartStyle: string): PlayerState {
-  return createPlayer(name, role, role === "racer" ? KART_COLORS[kartStyle] ?? KART_COLORS.lime : "#b7c0ba");
+function makePlayer(name: string, role: "racer" | "spectator", instituteId: string): PlayerState {
+  const institute = instituteById(instituteId);
+  return createPlayer(name, role, role === "racer" ? institute?.color ?? NO_INSTITUTE_COLOR : "#b7c0ba", institute?.id ?? "");
 }
 
 function readInput(): KartInput {
@@ -213,7 +207,7 @@ function renderState(state: RaceState): void {
   for (const [id, player] of players) {
     const item = document.createElement("li");
     const name = document.createElement("span");
-    name.textContent = `${player.name}${id === state.hostId ? " ★" : ""}`;
+    name.textContent = `${playerLabel(player)}${id === state.hostId ? " ★" : ""}`;
     const role = document.createElement("span");
     role.className = "player-role";
     role.textContent = player.role === "racer" ? "RACER" : "TILSKUER";
@@ -335,7 +329,7 @@ function renderStandings(racers: Array<[string, PlayerState]>): void {
     rank.textContent = `${player.place || index + 1}`;
     const name = document.createElement("span");
     name.className = "who";
-    name.textContent = player.name;
+    name.textContent = playerLabel(player);
     const progress = document.createElement("small");
     progress.textContent = player.finished ? "MÅL" : `${player.lap}`;
     row.append(rank, dot, name, progress);
@@ -425,10 +419,7 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
         source.channel.close();
         return;
       }
-      const player = makePlayer(name, role, "lime");
-      if (role === "racer" && typeof hello?.color === "string" && Object.values(KART_COLORS).includes(hello.color)) {
-        player.color = hello.color;
-      }
+      const player = makePlayer(name, role, typeof hello?.institute === "string" ? hello.institute : "");
       raceState.players.set(source.playerId, player);
       playerInputs.set(source.playerId, { ...IDLE_INPUT });
       sendToPeer(source, { type: "welcome", playerId: source.playerId });
@@ -472,12 +463,12 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
   if (message.type === "results") renderResults(message.result);
 }
 
-function configurePeer(target: PeerConnection, name?: string, role?: "racer" | "spectator", kartStyle?: string): void {
+function configurePeer(target: PeerConnection, name?: string, role?: "racer" | "spectator", instituteId?: string): void {
   const channel = target.channel;
   channel.on("open", () => {
     if (!isHost) {
       lobbyStatus.textContent = "Forbundet med værten.";
-      if (name && role) sendToPeer(target, { type: "hello", player: makePlayer(name, role, kartStyle ?? "lime") });
+      if (name && role) sendToPeer(target, { type: "hello", player: makePlayer(name, role, instituteId ?? "") });
       return;
     }
     lobbyStatus.textContent = "Spilleren er forbundet. Del invitationslinket med flere.";
@@ -526,7 +517,7 @@ function createRoom(): void {
   peerClient.on("open", (id) => {
     localSessionId = id;
     raceState = createRaceState(localSessionId);
-    const player = makePlayer(name, "racer", kartStyleInput.value);
+    const player = makePlayer(name, "racer", instituteInput.value);
     player.host = true;
     raceState.players.set(localSessionId, player);
     const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(id)}`;
@@ -580,7 +571,7 @@ function joinRoom(): void {
     const channel = peerClient.connect(roomId, { reliable: true, serialization: "json" });
     const target: PeerConnection = { channel, playerId: roomId };
     peer = target;
-    configurePeer(target, name, role, kartStyleInput.value);
+    configurePeer(target, name, role, instituteInput.value);
     startInputUpdates();
     const timeout = window.setTimeout(() => {
       if (peer !== target || channel.open) return;
@@ -642,7 +633,7 @@ function finishRace(): void {
   for (const player of racers) player.speed = 0;
   const result = {
     players: racers.map((player) => ({
-      name: player.name,
+      name: playerLabel(player),
       place: player.place,
       finished: player.finished,
       finishTime: Math.round(player.finishTime * 10) / 10,
@@ -697,7 +688,7 @@ function startSolo(withBots: boolean): void {
   isHost = true;
   localSessionId = "solo-player";
   raceState = createRaceState(localSessionId);
-  raceState.players.set(localSessionId, { ...makePlayer(name, "racer", kartStyleInput.value), host: true });
+  raceState.players.set(localSessionId, { ...makePlayer(name, "racer", instituteInput.value), host: true });
   showError("");
   showLobby();
   lobby.classList.add("hidden");
