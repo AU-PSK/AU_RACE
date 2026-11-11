@@ -41,10 +41,10 @@ export function unlockAudio(): void {
   const filter = context.createBiquadFilter();
   filter.type = "lowpass";
   filter.Q.value = 2.5;
-  filter.frequency.value = 1400;
+  filter.frequency.value = 900;
   const body = context.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 900;
+  body.frequency.value = 500;
   body.gain.value = 6;
   const low = context.createOscillator();
   low.type = "sawtooth";
@@ -122,12 +122,12 @@ export function setEngine(speed: number, boosting: boolean, silence: boolean, dr
   const now = context.currentTime;
   const ratio = Math.min(1.6, Math.max(0, speed) / 16);
   // Gokartmotor: høj tomgang (~130 Hz) der skriger op mod ~600 Hz ved fuld fart.
-  const base = 130 + ratio * 330 + (boosting ? 70 : 0);
+  const base = 75 + ratio * 190 + (boosting ? 40 : 0);
   engine.low.frequency.setTargetAtTime(base, now, 0.07);
-  engine.high.frequency.setTargetAtTime(base * 2, now, 0.07);
+  engine.high.frequency.setTargetAtTime(base * 1.5, now, 0.07);
   engine.lfo.frequency.setTargetAtTime(base / 3, now, 0.07);
-  engine.filter.frequency.setTargetAtTime(1100 + ratio * 1800, now, 0.1);
-  engine.rattle.frequency.setTargetAtTime(1800 + ratio * 1800, now, 0.1);
+  engine.filter.frequency.setTargetAtTime(700 + ratio * 1300, now, 0.1);
+  engine.rattle.frequency.setTargetAtTime(1200 + ratio * 1200, now, 0.1);
   engine.rattleGain.gain.setTargetAtTime(0.12 + ratio * 0.25, now, 0.1);
   engine.gain.gain.setTargetAtTime(silence ? 0 : 0.05 + ratio * 0.04, now, 0.12);
 

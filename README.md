@@ -16,6 +16,27 @@ npm run dev
 Åbn Vite-adressen fra terminalen (normalt `http://localhost:5173`). Både solo
 og multiplayer kan prøves uden at starte en spilsserver.
 
+Kvalitetstjek: `npm run typecheck`, `npm run lint`, `npm test` (Vitest) og
+`npm run test:e2e` (Playwright-røgtest; kræver `npx playwright install chromium` første gang).
+
+## Valgfri TURN-server til multiplayer
+
+Multiplayer bruger direkte WebRTC-forbindelser (PeerJS) med en offentlig STUN-server. På netværk,
+der blokerer peer-to-peer-trafik (fx eduroam, firmanetværk eller VPN), kan gæster ikke forbinde.
+En TURN-server kan videresende trafikken. Den er slået fra som standard og aktiveres ved build via
+miljøvariabler (fx i en lokal `.env`, som er git-ignoreret):
+
+```sh
+VITE_TURN_URL=turn:turn.example.org:3478,turns:turn.example.org:5349
+VITE_TURN_USERNAME=bruger
+VITE_TURN_CREDENTIAL=adgangskode
+```
+
+`VITE_TURN_URL` kan indeholde flere adresser adskilt af komma. Brugernavn og adgangskode er
+valgfrie. Variablerne bliver en del af den offentlige klientkode, så brug kun midlertidige eller
+begrænsede legitimationsoplysninger, og læg dem ikke i repoet. Til GitHub Pages skal de sættes som
+miljøvariabler i build-trinnet i workflowet.
+
 ## Åbn spillet via en offentlig URL
 
 [Åbn AU Race](https://au-psk.github.io/AU_RACE/) på GitHub Pages.
