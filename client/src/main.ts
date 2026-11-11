@@ -1,6 +1,6 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
 import { playBeep, playSfx, setEngine, toggleMute, unlockAudio } from "./audio.js";
-import { RaceScene } from "./game.js";
+import type { RaceScene } from "./game.js";
 import { INSTITUTES, saveInstitute, selectedInstitute } from "./institutes.js";
 import { drawMinimap } from "./minimap.js";
 import {
@@ -45,10 +45,24 @@ const KART_COLORS: Record<string, string> = {
 };
 const ITEM_ICONS: Record<ItemKind, string> = { coffee: "☕", paper: "📄", frisbee: "🥏" };
 const ROULETTE_ICONS = Object.values(ITEM_ICONS);
+// TURN er valgfri: sæt VITE_TURN_URL (og evt. VITE_TURN_USERNAME / VITE_TURN_CREDENTIAL) ved build.
+// Oplysningerne ender i klienten, så brug midlertidige eller begrænsede legitimationsoplysninger.
+const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
 const RTC_CONFIGURATION: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    ...(TURN_URL
+      ? [{
+          urls: TURN_URL.split(",").map((url) => url.trim()),
+          username: import.meta.env.VITE_TURN_USERNAME as string | undefined,
+          credential: import.meta.env.VITE_TURN_CREDENTIAL as string | undefined,
+        }]
+      : []),
+  ],
 };
 const CONNECT_TIMEOUT_MS = 15000;
+const INPUT_POLL_MS = 50;
+const INPUT_HEARTBEAT_MS = 500;
 const CONNECTION_BLOCKED_MESSAGE =
   "Kunne ikke oprette direkte forbindelse til værten. Netværket kan blokere peer-to-peer-trafik (fx eduroam, firmanetværk eller VPN). Prøv et andet netværk eller en telefon som hotspot, og tjek at værten stadig er online.";
 
@@ -105,6 +119,7 @@ const speedLabel = byId<HTMLElement>("speed");
 const speedFill = byId<HTMLElement>("speed-fill");
 const toast = byId<HTMLElement>("toast");
 let game: RaceScene | null = null;
+let sceneToken = 0;
 let localSessionId = "";
 let hostMode = false;
 let isHost = false;
@@ -389,10 +404,11 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
   if (!raceState) return;
   if (isHost) {
     if (message.type === "hello") {
-      const name = typeof message.player.name === "string"
-        ? message.player.name.trim().replace(/\s+/g, " ").slice(0, 20)
+      const hello = message.player as Partial<PlayerState> | null | undefined;
+      const name = typeof hello?.name === "string"
+        ? hello.name.trim().replace(/\s+/g, " ").slice(0, 20)
         : "";
-      const role = message.player.role === "spectator" ? "spectator" : "racer";
+      const role = hello?.role === "spectator" ? "spectator" : "racer";
       if (!name) {
         sendToPeer(source, { type: "error", message: "Skriv et gyldigt kaldenavn før du deltager." });
         source.channel.close();
@@ -410,8 +426,8 @@ function handlePeerMessage(source: PeerConnection, message: PeerMessage): void {
         return;
       }
       const player = makePlayer(name, role, "lime");
-      if (role === "racer" && Object.values(KART_COLORS).includes(message.player.color)) {
-        player.color = message.player.color;
+      if (role === "racer" && typeof hello?.color === "string" && Object.values(KART_COLORS).includes(hello.color)) {
+        player.color = hello.color;
       }
       raceState.players.set(source.playerId, player);
       playerInputs.set(source.playerId, { ...IDLE_INPUT });
@@ -517,8 +533,7 @@ function createRoom(): void {
     inviteLink.textContent = url;
     inviteLink.setAttribute("href", url);
     showLobby();
-    game = new RaceScene(document.body, localSessionId);
-    renderState(raceState);
+    openScene(localSessionId);
   });
   peerClient.on("connection", (channel) => {
     const target: PeerConnection = { channel, playerId: channel.peer };
@@ -532,7 +547,7 @@ function createRoom(): void {
     showError("Forbindelsen til signaltjenesten blev afbrudt. Genindlæs siden for at oprette en ny lobby.");
   });
   showLobby();
-  game = new RaceScene(document.body, "");
+  openScene("");
   copyLinkButton.textContent = "Kopiér invitationslink";
 }
 
@@ -558,7 +573,7 @@ function joinRoom(): void {
   showError("");
   lobbyStatus.textContent = "Forbinder til lobbyen …";
   showLobby();
-  game = new RaceScene(document.body, "");
+  openScene("");
   peerClient = new PeerClient({ config: RTC_CONFIGURATION });
   peerClient.on("open", () => {
     if (!peerClient) return;
@@ -567,11 +582,12 @@ function joinRoom(): void {
     peer = target;
     configurePeer(target, name, role, kartStyleInput.value);
     startInputUpdates();
-    window.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       if (peer !== target || channel.open) return;
       leaveSession();
       showError(CONNECTION_BLOCKED_MESSAGE);
     }, CONNECT_TIMEOUT_MS);
+    channel.on("open", () => window.clearTimeout(timeout));
   });
   peerClient.on("error", (error) => {
     leaveSession();
@@ -584,12 +600,24 @@ function joinRoom(): void {
 }
 
 // Gæster sender deres taster til værten; værten læser sine egne direkte i updateRace.
+// Kanalen er pålidelig og ordnet, så input sendes kun ved ændring plus en jævn heartbeat.
 function startInputUpdates(): void {
   window.clearInterval(inputTimer);
+  let lastSent = "";
+  let lastSentAt = 0;
   inputTimer = window.setInterval(() => {
-    if (!raceState || !peer || (raceState.phase !== "racing" && raceState.phase !== "countdown")) return;
-    sendToPeer(peer, { type: "input", input: takeInput() });
-  }, 50);
+    if (!raceState || !peer || (raceState.phase !== "racing" && raceState.phase !== "countdown")) {
+      lastSent = "";
+      return;
+    }
+    const input = takeInput();
+    const serialized = JSON.stringify(input);
+    const now = performance.now();
+    if (serialized === lastSent && now - lastSentAt < INPUT_HEARTBEAT_MS) return;
+    lastSent = serialized;
+    lastSentAt = now;
+    sendToPeer(peer, { type: "input", input });
+  }, INPUT_POLL_MS);
 }
 
 function startRace(withBots: boolean): void {
@@ -674,8 +702,19 @@ function startSolo(withBots: boolean): void {
   showLobby();
   lobby.classList.add("hidden");
   raceHud.classList.remove("hidden");
-  game = new RaceScene(document.body, localSessionId);
+  openScene(localSessionId);
   startRace(withBots);
+}
+
+// Three.js og terrændata hentes først, når en scene skal bruges, så menuen indlæses hurtigt.
+function openScene(focusId: string): void {
+  const token = ++sceneToken;
+  void import("./game.js").then(({ RaceScene }) => {
+    if (token !== sceneToken) return;
+    game?.dispose();
+    game = new RaceScene(document.body, focusId);
+    if (raceState) renderState(raceState);
+  });
 }
 
 function leaveSession(): void {
@@ -702,6 +741,7 @@ function resetSession(): void {
   for (const connectedPeer of peers.values()) connectedPeer.channel.close();
   peers.clear();
   playerInputs.clear();
+  sceneToken++;
   game?.dispose();
   game = null;
   raceState = null;
@@ -752,6 +792,15 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener("keyup", (event) => heldKeys.delete(event.code));
 window.addEventListener("blur", () => heldKeys.clear());
+// Skjulte faner throttles af browseren, så værtens simulering hakker for alle gæster.
+document.addEventListener("visibilitychange", () => {
+  if (!isHost || !raceState || raceState.phase === "lobby" || raceState.phase === "results") return;
+  if (document.hidden) {
+    broadcast({ type: "toast", message: "Værten skiftede fane – løbet kan hakke, til værten er tilbage." });
+  } else if (peers.size) {
+    showToast("Hold løbsfanen åben og synlig, så gæsterne får et jævnt løb.");
+  }
+});
 
 // Kun i udvikling: giver automatiske browsertests adgang til løbstilstanden.
 if (import.meta.env.DEV) {

@@ -8,6 +8,10 @@
   "scripts": {
     "dev": "npm run dev --workspace client",
     "build": "npm run build --workspace client",
+    "test": "npm run test --workspace client",
+    "test:e2e": "npm run test:e2e --workspace client",
+    "lint": "npm run lint --workspace client",
+    "typecheck": "tsc --noEmit -p client",
     "terrain": "node tools/terrain-data.mjs"
   },
   "devDependencies": {
