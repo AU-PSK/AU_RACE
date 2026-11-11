@@ -5,7 +5,19 @@ import type { Sfx } from "./race.js";
 
 let context: AudioContext | null = null;
 let master: GainNode | null = null;
-let engine: { low: OscillatorNode; high: OscillatorNode; gain: GainNode } | null = null;
+let engine: {
+  low: OscillatorNode;
+  high: OscillatorNode;
+  gain: GainNode;
+  filter: BiquadFilterNode;
+  lfo: OscillatorNode;
+  rattle: BiquadFilterNode;
+  rattleGain: GainNode;
+  squeal: AudioBufferSourceNode;
+  squealGain: GainNode;
+} | null = null;
+let lastSpeed = 0;
+let lastPop = 0;
 let muted = false;
 
 export function unlockAudio(): void {
@@ -22,22 +34,80 @@ export function unlockAudio(): void {
   master.gain.value = muted ? 0 : 0.5;
   master.connect(context.destination);
 
+  // Gokart: lille, hurtigt snurrende motor. Savtand + pulserende skævvridning giver den nasale "wrrr",
+  // og en rasletone (støj) og en ru amplitudemodulation giver forbrændingsslagene.
   const gain = context.createGain();
   gain.gain.value = 0;
   const filter = context.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.value = 900;
+  filter.Q.value = 2.5;
+  filter.frequency.value = 1400;
+  const body = context.createBiquadFilter();
+  body.type = "peaking";
+  body.frequency.value = 900;
+  body.gain.value = 6;
   const low = context.createOscillator();
   low.type = "sawtooth";
   const high = context.createOscillator();
   high.type = "square";
-  low.connect(filter);
-  high.connect(filter);
-  filter.connect(gain);
+  high.detune.value = 9;
+  const highGain = context.createGain();
+  highGain.gain.value = 0.45;
+
+  // Forbrændingsslag: amplituden svinger hurtigt, så lyden bliver ru frem for ren.
+  const pulse = context.createGain();
+  pulse.gain.value = 0.75;
+  const lfo = context.createOscillator();
+  lfo.type = "square";
+  const lfoDepth = context.createGain();
+  lfoDepth.gain.value = 0.25;
+  lfo.connect(lfoDepth);
+  lfoDepth.connect(pulse.gain);
+
+  const buzz = context.createBufferSource();
+  const noiseLength = context.sampleRate;
+  const noiseBuffer = context.createBuffer(1, noiseLength, context.sampleRate);
+  const noiseData = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < noiseLength; i++) noiseData[i] = Math.random() * 2 - 1;
+  buzz.buffer = noiseBuffer;
+  buzz.loop = true;
+  const rattle = context.createBiquadFilter();
+  rattle.type = "bandpass";
+  rattle.frequency.value = 2200;
+  rattle.Q.value = 0.8;
+  const rattleGain = context.createGain();
+  rattleGain.gain.value = 0;
+
+  // Dækhyl under drift: hvæsende støj med en let svingende tone, som kun høres, mens der drives.
+  const squeal = context.createBufferSource();
+  squeal.buffer = noiseBuffer;
+  squeal.loop = true;
+  const squealFilter = context.createBiquadFilter();
+  squealFilter.type = "bandpass";
+  squealFilter.frequency.value = 1500;
+  squealFilter.Q.value = 9;
+  const squealGain = context.createGain();
+  squealGain.gain.value = 0;
+  squeal.connect(squealFilter);
+  squealFilter.connect(squealGain);
+  squealGain.connect(master);
+
+  low.connect(pulse);
+  high.connect(highGain);
+  highGain.connect(pulse);
+  pulse.connect(filter);
+  filter.connect(body);
+  body.connect(gain);
+  buzz.connect(rattle);
+  rattle.connect(rattleGain);
+  rattleGain.connect(gain);
   gain.connect(master);
   low.start();
   high.start();
-  engine = { low, high, gain };
+  lfo.start();
+  buzz.start();
+  squeal.start();
+  engine = { low, high, gain, filter, lfo, rattle, rattleGain, squeal, squealGain };
 }
 
 export function toggleMute(): boolean {
@@ -47,13 +117,32 @@ export function toggleMute(): boolean {
 }
 
 /** Motorlyd efter fart. Kaldes ved hver tilstandsopdatering; silence=true slukker motoren. */
-export function setEngine(speed: number, boosting: boolean, silence: boolean): void {
+export function setEngine(speed: number, boosting: boolean, silence: boolean, drifting = false): void {
   if (!context || !engine) return;
   const now = context.currentTime;
   const ratio = Math.min(1.6, Math.max(0, speed) / 16);
-  engine.low.frequency.setTargetAtTime(48 + ratio * 70 + (boosting ? 18 : 0), now, 0.08);
-  engine.high.frequency.setTargetAtTime(96 + ratio * 140 + (boosting ? 30 : 0), now, 0.08);
-  engine.gain.gain.setTargetAtTime(silence ? 0 : 0.05 + ratio * 0.05, now, 0.12);
+  // Gokartmotor: høj tomgang (~130 Hz) der skriger op mod ~600 Hz ved fuld fart.
+  const base = 130 + ratio * 330 + (boosting ? 70 : 0);
+  engine.low.frequency.setTargetAtTime(base, now, 0.07);
+  engine.high.frequency.setTargetAtTime(base * 2, now, 0.07);
+  engine.lfo.frequency.setTargetAtTime(base / 3, now, 0.07);
+  engine.filter.frequency.setTargetAtTime(1100 + ratio * 1800, now, 0.1);
+  engine.rattle.frequency.setTargetAtTime(1800 + ratio * 1800, now, 0.1);
+  engine.rattleGain.gain.setTargetAtTime(0.12 + ratio * 0.25, now, 0.1);
+  engine.gain.gain.setTargetAtTime(silence ? 0 : 0.05 + ratio * 0.04, now, 0.12);
+
+  const squealing = !silence && drifting && speed > 6;
+  engine.squealGain.gain.setTargetAtTime(squealing ? 0.05 + ratio * 0.05 : 0, now, 0.06);
+
+  // Udstødningsklik: et hurtigt fald i fart ved høj fart svarer til at slippe speederen.
+  if (!silence && lastSpeed / 16 > 0.6 && lastSpeed - speed > 0.25 && now - lastPop > 0.12) {
+    lastPop = now;
+    for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) {
+      noise(i * 0.07 + Math.random() * 0.03, 0.05, 0.35, 700 + Math.random() * 500);
+      tone(180 + Math.random() * 60, i * 0.07, 0.05, "square", 0.08, 70);
+    }
+  }
+  lastSpeed = silence ? 0 : speed;
 }
 
 function tone(frequency: number, start: number, length: number, type: OscillatorType, volume: number, slideTo?: number): void {
