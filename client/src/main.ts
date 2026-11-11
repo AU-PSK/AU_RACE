@@ -1,7 +1,7 @@
 import { Peer as PeerClient, type DataConnection } from "peerjs";
 import { playBeep, playSfx, setEngine, toggleMute, unlockAudio } from "./audio.js";
 import { RaceScene } from "./game.js";
-import { INSTITUTES, INSTITUTE_STORAGE_KEY, selectedInstitute } from "./institutes.js";
+import { INSTITUTES, saveInstitute, selectedInstitute } from "./institutes.js";
 import { drawMinimap } from "./minimap.js";
 import {
   BOOST_SPEED, IDLE_INPUT, MAX_RACERS, addBots, createPlayer, createRaceState, prepareRace, resetToLobby, stepRace,
@@ -68,7 +68,10 @@ const kartStyleInput = byId<HTMLSelectElement>("kart-style");
 const instituteInput = byId<HTMLSelectElement>("institute");
 for (const institute of INSTITUTES) instituteInput.add(new Option(institute.name, institute.id));
 instituteInput.value = selectedInstitute()?.id ?? "";
-instituteInput.addEventListener("change", () => localStorage.setItem(INSTITUTE_STORAGE_KEY, instituteInput.value));
+instituteInput.addEventListener("change", () => {
+  saveInstitute(instituteInput.value);
+  game?.refreshInstituteHighlight();
+});
 const roomIdInput = byId<HTMLInputElement>("room-id");
 const createButton = byId<HTMLButtonElement>("create-button");
 const soloButton = byId<HTMLButtonElement>("solo-button");
