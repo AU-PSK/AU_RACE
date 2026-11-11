@@ -6,7 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
 const METERS_PER_UNIT = 4;
 const ROUTE_CLEARANCE = 3.8; // bygninger tættere på banen end dette (spilenheder) fjernes
 const SIMPLIFY_METERS = 4;
-const MAX_LABELS = 14;
+const MAX_LABELS = 60;
 
 // Rækkefølgen følger den ønskede rute: Bartholins Allé → Wilhelm Meyers Allé →
 // Ole Worms Allé → Karl Verners Vej → Victor Albecks Vej → tilbage til start.
@@ -130,12 +130,48 @@ const buildingData = buildings.map((b) => ({
   ...(labelNames.has(b.name) ? { n: b.name } : {}),
 }));
 
-const polygons = (predicate) => area.filter((w) => w.geometry.length >= 4 && predicate(w.tags ?? {})).map((w) => flat(ring(w)));
+const polygons = (predicate) =>
+  area.filter((w) => w.type === "way" && w.geometry.length >= 4 && predicate(w.tags ?? {})).map((w) => flat(ring(w)));
+
+// Samler en multipolygon-rolle (outer/inner) til lukkede ringe ved at sammenkæde medlemmernes endepunkter.
+function relationRings(relation, role) {
+  const same = (a, b) => a.lat === b.lat && a.lon === b.lon;
+  const pending = relation.members.filter((m) => m.type === "way" && m.role === role && m.geometry?.length > 1).map((m) => [...m.geometry]);
+  const rings = [];
+  while (pending.length) {
+    let current = pending.pop();
+    let grew = true;
+    while (grew && !same(current[0], current[current.length - 1])) {
+      grew = false;
+      for (let i = 0; i < pending.length; i++) {
+        const piece = pending[i];
+        const tail = current[current.length - 1];
+        if (same(tail, piece[0])) current = [...current, ...piece.slice(1)];
+        else if (same(tail, piece[piece.length - 1])) current = [...current, ...[...piece].reverse().slice(1)];
+        else continue;
+        pending.splice(i, 1);
+        grew = true;
+        break;
+      }
+    }
+    if (current.length >= 4 && same(current[0], current[current.length - 1])) {
+      const points = current.map(project);
+      points.pop();
+      rings.push(flat(points));
+    }
+  }
+  return rings;
+}
+const waterRelations = area.filter((w) => w.type === "relation" && w.tags?.natural === "water");
 const forests = polygons((t) => t.landuse === "forest" || t.natural === "wood");
 const parks = polygons((t) => t.leisure === "park" || t.leisure === "garden");
 const pitches = polygons((t) => t.leisure === "pitch");
-const water = polygons((t) => t.natural === "water");
-const streams = area.filter((w) => w.tags?.waterway).map((w) => flat(w.geometry.map(project)));
+const water = [
+  ...polygons((t) => t.natural === "water"),
+  ...waterRelations.flatMap((r) => relationRings(r, "outer")),
+];
+const islands = waterRelations.flatMap((r) => relationRings(r, "inner"));
+const streams = area.filter((w) => w.type === "way" && w.tags?.waterway).map((w) => flat(w.geometry.map(project)));
 
 const data = {
   route: flat(route),
@@ -144,6 +180,7 @@ const data = {
   parks,
   pitches,
   water,
+  islands,
   streams,
 };
 const source = `// Genereret af tools/build-campus.mjs. Ret ikke i hånden; kør generatoren igen.
@@ -165,6 +202,7 @@ export interface Campus {
   parks: number[][];
   pitches: number[][];
   water: number[][];
+  islands: number[][];
   streams: number[][];
 }
 export const campus: Campus = ${JSON.stringify(data)};
