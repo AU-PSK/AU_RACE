@@ -239,7 +239,7 @@ function renderState(state: RaceState): void {
   speedFill.style.width = `${Math.min(100, (speed / BOOST_SPEED) * 100)}%`;
   speedLines.classList.toggle("on", Boolean(racing && me && me.boost > 0));
   controlsHint.classList.toggle("faded", state.phase === "racing" && state.elapsed > 8);
-  setEngine(me?.speed ?? 0, Boolean(me && me.boost > 0), !racing || state.phase === "results");
+  setEngine(me?.speed ?? 0, Boolean(me && me.boost > 0), !racing || state.phase === "results", Boolean(me && me.driftDir !== 0));
   renderItem(me, racing);
   renderCountdown(state);
 
