@@ -216,7 +216,7 @@ function renderState(state: RaceState): void {
   }
 
   startButton.classList.toggle("hidden", !isLocalHost);
-  startButton.disabled = racers.length === 0 || state.phase !== "lobby";
+  startButton.disabled = (racers.length === 0 && !botsToggle.checked) || state.phase !== "lobby";
   startButton.textContent = racers.length === 1 && !botsToggle.checked ? "Start tidskørsel" : "Start løb";
   returnButton.classList.toggle("hidden", !isLocalHost && !soloMode);
   if (state.phase === "lobby") {
@@ -517,7 +517,7 @@ function createRoom(): void {
   peerClient.on("open", (id) => {
     localSessionId = id;
     raceState = createRaceState(localSessionId);
-    const player = makePlayer(name, "racer", instituteInput.value);
+    const player = makePlayer(name, roleInput.value === "spectator" ? "spectator" : "racer", instituteInput.value);
     player.host = true;
     raceState.players.set(localSessionId, player);
     const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(id)}`;
