@@ -800,79 +800,44 @@ export class RaceScene {
     const white = this.toon("#fafafa");
     const skin = this.toon("#ffcfa3");
 
-    // Golfbil: lavt chassis, snudeformet front, bænk, tag på stolper, forrude og golfbag bagpå.
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.22, 2.7), paint);
-    floor.position.set(0, 0.5, 0.1);
-    floor.castShadow = true;
-    this.outline(floor, 1.05);
-    body.add(floor);
+    const hullGeometry = new THREE.CapsuleGeometry(0.42, 1.2, 4, 12);
+    hullGeometry.rotateX(Math.PI / 2);
+    const hull = new THREE.Mesh(hullGeometry, paint);
+    hull.scale.set(1.5, 0.62, 1);
+    hull.position.y = 0.55;
+    hull.castShadow = true;
+    this.outline(hull, 1.06);
+    body.add(hull);
 
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 0.9), paint);
-    nose.position.set(0, 0.72, -1.15);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), trim);
+    nose.scale.set(1.25, 0.5, 0.95);
+    nose.position.set(0, 0.5, -1.15);
     nose.castShadow = true;
-    this.outline(nose, 1.06);
+    this.outline(nose, 1.08);
     body.add(nose);
-    for (const x of [-0.5, 0.5]) {
-      const headlight = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), white);
-      headlight.position.set(x, 0.78, -1.62);
-      body.add(headlight);
-    }
 
-    const bench = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.2, 0.7), trim);
-    bench.position.set(0, 0.8, 0.45);
-    bench.castShadow = true;
-    this.outline(bench, 1.08);
-    body.add(bench);
-    const backrest = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.6, 0.14), trim);
-    backrest.position.set(0, 1.15, 0.85);
-    backrest.castShadow = true;
-    this.outline(backrest, 1.08);
-    body.add(backrest);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.75, 0.22), trim);
+    seat.position.set(0, 0.95, 0.6);
+    seat.castShadow = true;
+    this.outline(seat, 1.1);
+    body.add(seat);
 
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.1, 1.9), white);
-    roof.position.set(0, 2.15, 0.2);
-    roof.castShadow = true;
-    this.outline(roof, 1.04);
-    body.add(roof);
-    for (const x of [-0.82, 0.82]) {
-      for (const z of [-0.55, 0.9]) {
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.3, 8), steel);
-        post.position.set(x, 1.5, z);
-        body.add(post);
-      }
-    }
-    const windshield = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.6, 0.04),
-      new THREE.MeshBasicMaterial({ color: "#bfe6ff", transparent: true, opacity: 0.35, depthWrite: false }),
-    );
-    windshield.position.set(0, 1.55, -0.55);
-    windshield.rotation.x = -0.25;
-    body.add(windshield);
-
-    const bag = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.17, 0.9, 12), dark);
-    bag.position.set(0, 1.0, 1.35);
-    bag.rotation.x = -0.15;
-    this.outline(bag, 1.08);
-    body.add(bag);
-    for (const [x, tilt] of [[-0.08, 0.1], [0.08, -0.1]] as const) {
-      const club = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.7, 6), steel);
-      club.position.set(x, 1.6, 1.3);
-      club.rotation.z = tilt;
-      body.add(club);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.14), steel);
-      head.position.set(x + tilt * 0.35, 1.95, 1.3);
-      body.add(head);
-    }
-
-    // Elektrisk turbolys bag bilen i stedet for udstødningsflammer.
+    const engine = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.5), dark);
+    engine.position.set(0, 0.7, 1.12);
+    this.outline(engine, 1.08);
+    body.add(engine);
     const flames: THREE.Mesh[] = [];
-    for (const x of [-0.45, 0.45]) {
+    for (const x of [-0.28, 0.28]) {
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.5, 8), steel);
+      pipe.rotation.x = Math.PI / 2;
+      pipe.position.set(x, 0.62, 1.5);
+      body.add(pipe);
       const flame = new THREE.Mesh(
         new THREE.ConeGeometry(0.2, 1.4, 10),
-        new THREE.MeshBasicMaterial({ color: "#6ee7ff", transparent: true, opacity: 0.9 }),
+        new THREE.MeshBasicMaterial({ color: "#ffb347", transparent: true, opacity: 0.9 }),
       );
       flame.rotation.x = Math.PI / 2;
-      flame.position.set(x, 0.55, 2.2);
+      flame.position.set(x, 0.62, 2.2);
       flame.visible = false;
       body.add(flame);
       flames.push(flame);
@@ -881,45 +846,46 @@ export class RaceScene {
     const wheels: THREE.Mesh[] = [];
     const frontPivots: THREE.Group[] = [];
     for (const x of [-1, 1]) {
-      const rear = this.wheelPart(0.4, 0.34, dark, white);
-      rear.position.set(x * 0.95, 0.4, 0.85);
+      const rear = this.wheelPart(0.52, 0.5, dark, steel);
+      rear.position.set(x * 0.95, 0.52, 0.75);
       body.add(rear);
       wheels.push(rear);
       const pivot = new THREE.Group();
-      pivot.position.set(x * 0.95, 0.36, -0.95);
-      const front = this.wheelPart(0.37, 0.3, dark, white);
+      pivot.position.set(x * 0.88, 0.36, -0.85);
+      const front = this.wheelPart(0.37, 0.3, dark, steel);
       pivot.add(front);
       body.add(pivot);
       wheels.push(front);
       frontPivots.push(pivot);
     }
 
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.36, 14, 10), white);
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.4, 14, 10), white);
     torso.scale.set(0.95, 1.05, 0.8);
-    torso.position.set(0.32, 1.25, 0.4);
+    torso.position.set(0, 1.0, 0.3);
     this.outline(torso, 1.08);
     body.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 16, 12), skin);
-    head.position.set(0.32, 1.78, 0.35);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), skin);
+    head.position.set(0, 1.55, 0.25);
     this.outline(head, 1.1);
     body.add(head);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.45), paint);
-    cap.position.set(0.32, 1.82, 0.35);
-    this.outline(cap, 1.1);
-    body.add(cap);
-    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.26), paint);
-    brim.position.set(0.32, 1.85, 0.0);
-    body.add(brim);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.58), paint);
+    helmet.position.set(0, 1.56, 0.26);
+    helmet.rotation.x = -0.25;
+    this.outline(helmet, 1.1);
+    body.add(helmet);
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.13, 0.12), dark);
+    visor.position.set(0, 1.58, -0.04);
+    body.add(visor);
 
     const steeringWheel = new THREE.Group();
-    steeringWheel.position.set(0.32, 1.2, -0.25);
+    steeringWheel.position.set(0, 1.0, -0.3);
     steeringWheel.rotation.x = -0.9;
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.045, 8, 18), dark);
     steeringWheel.add(ring);
     body.add(steeringWheel);
     for (const x of [-1, 1]) {
       const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.55, 8), white);
-      arm.position.set(0.32 + x * 0.3, 1.2, 0.12);
+      arm.position.set(x * 0.32, 1.0, 0.02);
       arm.rotation.set(Math.PI / 2 - 0.4, 0, -x * 0.25);
       body.add(arm);
     }
@@ -1032,7 +998,7 @@ export class RaceScene {
         if (Math.random() > 0.9 * rate) continue;
         const jet = forward.clone().multiplyScalar(-9).add(new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() * 1.2, (Math.random() - 0.5) * 1.5));
         const origin = ground(kart.root.position.clone().addScaledVector(forward, -1.9).addScaledVector(right, side * KART_SCALE), 0.85);
-        this.emit(origin, jet, Math.random() < 0.5 ? "#6ee7ff" : "#3a8dff", 0.35, 0.9, 0.6, true, 0.95);
+        this.emit(origin, jet, Math.random() < 0.5 ? "#ffb347" : "#ff5a36", 0.35, 0.9, 0.6, true, 0.95);
       }
     }
     if (data.spin > 0 && Math.random() < 0.4 * rate) {
@@ -1119,7 +1085,7 @@ export class RaceScene {
       const target = this.tmpTarget.copy(position)
         .addScaledVector(forward, -distance)
         .addScaledVector(right, -focusKart.slide * 3.2);
-      target.y += 4.1 + speedRatio * 0.3;
+      target.y += 3.7 + speedRatio * 0.3;
       // Ligger kameraet inde i en bygning, trækkes det ind mod karten, til det er frit igen.
       const eye = this.tmpEye.copy(target);
       for (let fraction = 1; fraction > 0.3; fraction -= 0.1) {

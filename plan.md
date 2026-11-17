@@ -1,8 +1,8 @@
-# Plan: AU Universitetspark 3D-golfbilsspil
+# Plan: AU Universitetspark 3D-gokartspil
 
 ## Mål
 
-Et 3D-golfbilsspil, der spilles i pc-browseren uden installation. En vært opretter et løb og deler et link; gæster åbner linket, vælger et kaldenavn og kører med. Værtens browser styrer løbet. Banen er en spilfortolkning af Universitetsparkens rundstrækning (Bartholins Allé → Wilhelm Meyers Allé → Ole Worms Allé → Karl Verners Vej → Victor Albecks Vej → start), ikke en køreguide til de virkelige veje.
+Et 3D-gokartspil, der spilles i pc-browseren uden installation. En vært opretter et løb og deler et link; gæster åbner linket, vælger et kaldenavn og kører med. Værtens browser styrer løbet. Banen er en spilfortolkning af Universitetsparkens rundstrækning (Bartholins Allé → Wilhelm Meyers Allé → Ole Worms Allé → Karl Verners Vej → Victor Albecks Vej → start), ikke en køreguide til de virkelige veje.
 
 Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke officielt AU-branding og kopierer ingen andre spils figurer, musik eller baner.
 
@@ -15,8 +15,8 @@ Spillet er en **uofficiel prototype** til kolleger og venner. Det bruger ikke of
 
 - Bane og omgivelser er genereret fra OpenStreetMap (`tools/`), så rundstrækningen følger de virkelige veje og bygninger. Kortdata kræver kildeangivelse (ODbL).
 
-- Kørslen er fri bevægelse (position, retning, fart) styret af vært-browseren: terrænkørsel, kollision med bygninger, træer og andre biler, drift med tre trin mini-turbo, boost-pads og tre bonustyper med roulette.
-- Computerbiler (`bots`) fylder startfeltet op til fire racere og køres af samme simulering som spillerne. De holdes tæt på de menneskelige spillere (rubber-banding).
+- Kørslen er fri bevægelse (position, retning, fart) styret af vært-browseren: terrænkørsel, kollision med bygninger, træer og andre karts, drift med tre trin mini-turbo, boost-pads og tre bonustyper med roulette.
+- Computerkarts (`bots`) fylder startfeltet op til fire racere og køres af samme simulering som spillerne. De holdes tæt på de menneskelige spillere (rubber-banding).
 - Udseende: cartoon-look (toon-materialer, sorte konturer, rødhvide kantstriber, himmel med skyer, partikler), dynamisk kamera og en HUD i racerspilsstil med minimap. Lyde syntetiseres med Web Audio, så der ikke er lydfiler at licensere.
 
 ## Kendte begrænsninger
@@ -64,7 +64,7 @@ Arbejdet kan deles i følgende pull requests:
 
 **Aktuel status:** Den officielle fildownload kræver token, som ikke var tilgængelig. Som alternativ bruges Mapterhorn (https://mapterhorn.com), som udstiller DHM/Terræn som åbne fliser uden konto (CC BY 4.0, kildekatalog `source-catalog/dk`: Klimadatastyrelsen, 0,4 m, tilgået 2025). Rasteret er hentet og bygget ind: 90 zoom 17-fliser (0,33 m/px), 298×348 celler à 4 m, ingen udfyldte celler, rute 33,6–48,2 m med største stigning 10,6 %. Det opfylder planens krav om reproducerbart udtræk uden hemmeligheder, men afviger fra "godkendt adgang": data er et omprøvet mirror. Datum (DVR90) og terræn-vs-overflade er ikke verificeret pr. flise; kun relative højder bruges. Officielle GeoTIFF-fliser kan stadig bygges med `build`.
 
-**Udført:** `tools/terrain-data.mjs` (`npm run terrain`) kan `bounds`, `fetch-tiles` (via `tools/fetch-terrain-tiles.py`, kræver Pillow), `build` (Mapterhorn-JSON eller GeoTIFF → `client/src/terrain-data.ts`, med NoData-kontrol, metadata og rapport over rutens højdeprofil), `selftest`, `synthetic` og `reset`. Klienten (`terrain.ts`, `track.ts`, `game.ts`) bruger højdedata til terrænmesh, vej, kantsten, bygninger, træer, objekter, kamera og biler. Kreditering står i README, `TERRAIN_DATA_LICENSE.md` og spillets startside. Typecheck og build er grønne.
+**Udført:** `tools/terrain-data.mjs` (`npm run terrain`) kan `bounds`, `fetch-tiles` (via `tools/fetch-terrain-tiles.py`, kræver Pillow), `build` (Mapterhorn-JSON eller GeoTIFF → `client/src/terrain-data.ts`, med NoData-kontrol, metadata og rapport over rutens højdeprofil), `selftest`, `synthetic` og `reset`. Klienten (`terrain.ts`, `track.ts`, `game.ts`) bruger højdedata til terrænmesh, vej, kantsten, bygninger, træer, objekter, kamera og karts. Kreditering står i README, `TERRAIN_DATA_LICENSE.md` og spillets startside. Typecheck og build er grønne.
 
 **Visuel kontrol (gennemført):** Spillet er kørt langs banen i en Playwright-browser (autopilot, solo mod computeren). Vej, kantsten, træer, bygninger og karts følger terrænet uden synlige huller, gennemskæringer eller svævende objekter, og overgangen mellem vej/kantsten og terræn (PR 2, punkt 6) fremstår ren. Kontrollen er udført med softwaregengivelse (SwiftShader) på lille opløsning; en kontrol på en rigtig GPU og i flere browsere mangler stadig.
 
@@ -83,7 +83,7 @@ Arbejdet kan deles i følgende pull requests:
 
 1. Placér bygninger, træer og andre relevante objekter på terrænet.
 2. Kontrollér bygninger på skrånende terræn, så fundamenter ikke tydeligt svæver eller begraves.
-3. Lad biler følge terrænhøjden visuelt; tilføj kun visuel hældning, hvor terrænets hældning tilsiger det.
+3. Lad karts følge terrænhøjden visuelt; tilføj kun visuel hældning, hvor terrænets hældning tilsiger det.
 4. Gennemgå scenen fra spillerens kamera langs banen, og ret synlige ujævnheder, overlap og terrænartefakter.
 5. Dokumentér højdedatakilden og dens kreditering i `README.md`.
 
@@ -97,7 +97,7 @@ PR 1 skal bekræfte både dataegnethed og praktisk, reproducerbar adgang til cam
 - Terrænet gengiver højdeforskellene i kildedataene med 3× lodret overdrivelse (`HEIGHT_EXAGGERATION`), fordi banens reelle relief på ca. 14 m ellers ikke kan ses; terrænet skygges desuden efter højde.
 - Terrænet fremstår jævnt ved datakildens opløsning uden tydelige trin eller tilfældige buler.
 - Vej og kantsten følger terrænets profil uden synlige huller, gennemskæringer eller svæven.
-- Bygninger, træer og biler er placeret i forhold til terrænets højde.
+- Bygninger, træer og karts er placeret i forhold til terrænets højde.
 - Terrændata kan genereres igen med projektets værktøjer, og manglende data rapporteres tydeligt.
 - Projektets build lykkes, og ændringen er kontrolleret i spillet langs ruten.
 - Løbsregler, grundlæggende kollision og multiplayerens beskedformat behøver ikke ændres.
@@ -107,7 +107,7 @@ PR 1 skal bekræfte både dataegnethed og praktisk, reproducerbar adgang til cam
 - At gøre hele spillet fotorealistisk eller udskifte den eksisterende cartoon-stil.
 - At lade bakker påvirke fart, acceleration, bremsning, vejgreb eller drift.
 - At ændre banens rute, løbsregler eller spilbalance.
-- At indføre 3D-kollision, væltning, fald eller avanceret bilfysik.
+- At indføre 3D-kollision, væltning, fald eller avanceret kartfysik.
 - At hente terrænhøjder dynamisk, mens spillet kører.
 - At modellere alle støttemure, trapper, bygningsdetaljer eller terrænforhold uden for spilleområdet.
 
@@ -117,7 +117,7 @@ Kilden er DHM/Terræn via Mapterhorn-fliser (se "Aktuel status" under PR 1); ras
 
 1. Test med to pc'er på AU-netværk og på tværs af netværk; registrér forbindelsesfejl og afgør derefter, om TURN er nødvendig.
 2. Brug prototypen internt som godkendt. Afklar særskilt tilladelse til AU-navn/branding og fakultetsnavne, før spillet deles bredt eller offentligt.
-3. Fakultetsbiler, originale bonusser og endelig balance (omgangstid er ca. 18 s; vurdér antal omgange og fart ved test).
+3. Fakultetskarts, originale bonusser og endelig balance (omgangstid er ca. 18 s; vurdér antal omgange og fart ved test).
 4. Test i moderne pc-browsere.
 
 ## Beslutninger og hensyn
