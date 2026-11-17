@@ -31,7 +31,7 @@ Status ud fra planen; gennemførelse skal bekræftes ved test og implementering.
 - **Afklaret:** Prototypen er godkendt til internt brug. Bredere offentlig deling kræver fortsat særskilt afklaring af AU-navn, branding og fakultetsnavne.
 - **Kandidat identificeret, endnu ikke godkendt:** Danmarks Højdemodel, DHM/Terræn, er den foretrukne kandidat. [Produktbeskrivelsen](https://confluence.kds.dk/download/attachments/25722920/dhm-prodspec-v1.0.0.pdf?version=1&modificationDate=1742295701551&api=v2) angiver GeoTIFF, 32-bit float, 40 cm pixelstørrelse eller finere, ETRS89 / UTM zone 32N (EPSG:25832) og DVR90 (EPSG:5799). Dataforsyningens [officielle fildownload-API](https://api.dataforsyningen.dk/rest/fildownload/v1.0/openapi.json) kræver autentificering med token; en konkret download af DHM/Terræn-rasteret kræver derfor adgang via en bruger/session. Intet raster er hentet eller inspiceret endnu, så campus-pixeldækning, dataårgang og reproducerbar download er fortsat ubekræftet.
 - **Åben beslutning:** Det er ikke besluttet, om TURN skal bruges. Uden TURN kan gæster på visse netværk være ude af stand til at forbinde; afprøv direkte WebRTC på AU-netværket og på tværs af netværk, før beslutningen træffes.
-- **Implementeret, ikke verificeret i spillet:** PR 1–3 for terræn er implementeret i koden (commits `a48bec3` og `5c50ed7`), og build er grøn. Den visuelle kontrol langs banen (PR 3, punkt 4) og overgangene ved vejkanter (PR 2, punkt 6) er ikke testet i en browser.
+- **Implementeret og visuelt kontrolleret:** PR 1–3 for terræn er implementeret i koden (commits `a48bec3` og `5c50ed7`), og build er grøn. Banen er kørt igennem i en browser med skærmbilleder (se "Visuel kontrol" under PR 1).
 - **Planlagt, ikke dokumenteret som gennemført:** multiplayer-, browser- og gameplaytest. Build- og spilletestresultater skal registreres, når arbejdet udføres.
 
 ## Plan: Mere naturtro terræn
@@ -66,7 +66,7 @@ Arbejdet kan deles i følgende pull requests:
 
 **Udført:** `tools/terrain-data.mjs` (`npm run terrain`) kan `bounds`, `fetch-tiles` (via `tools/fetch-terrain-tiles.py`, kræver Pillow), `build` (Mapterhorn-JSON eller GeoTIFF → `client/src/terrain-data.ts`, med NoData-kontrol, metadata og rapport over rutens højdeprofil), `selftest`, `synthetic` og `reset`. Klienten (`terrain.ts`, `track.ts`, `game.ts`) bruger højdedata til terrænmesh, vej, kantsten, bygninger, træer, objekter, kamera og karts. Kreditering står i README, `TERRAIN_DATA_LICENSE.md` og spillets startside. Typecheck og build er grønne.
 
-**Mangler:** Kør spillet langs banen og kontrollér terrænet visuelt (PR 3, punkt 4); det er ikke gjort, fordi der ikke var adgang til en browser. Kontrollér samtidig overgangen mellem vej/kantsten og terræn (PR 2, punkt 6), som i koden kun løses med et lille løft og `polygonOffset`.
+**Visuel kontrol (gennemført):** Spillet er kørt langs banen i en Playwright-browser (autopilot, solo mod computeren). Vej, kantsten, træer, bygninger og karts følger terrænet uden synlige huller, gennemskæringer eller svævende objekter, og overgangen mellem vej/kantsten og terræn (PR 2, punkt 6) fremstår ren. Kontrollen er udført med softwaregengivelse (SwiftShader) på lille opløsning; en kontrol på en rigtig GPU og i flere browsere mangler stadig.
 
 **Implementering:** PR 1–3 ligger i to commits og ikke i separate pull requests.
 
