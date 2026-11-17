@@ -16,8 +16,6 @@ let engine: {
   squeal: AudioBufferSourceNode;
   squealGain: GainNode;
 } | null = null;
-let lastSpeed = 0;
-let lastPop = 0;
 let muted = false;
 
 export function unlockAudio(): void {
@@ -34,33 +32,33 @@ export function unlockAudio(): void {
   master.gain.value = muted ? 0 : 0.5;
   master.connect(context.destination);
 
-  // Gokart: lille, hurtigt snurrende motor. Savtand + pulserende skævvridning giver den nasale "wrrr",
-  // og en rasletone (støj) og en ru amplitudemodulation giver forbrændingsslagene.
+  // Golfbil: dæmpet elektrisk summen. Rene toner (trekant + sinus) med en let svævende modulation
+  // og en svag støjtone fra dækkene i stedet for forbrændingsslag.
   const gain = context.createGain();
   gain.gain.value = 0;
   const filter = context.createBiquadFilter();
   filter.type = "lowpass";
-  filter.Q.value = 2.5;
+  filter.Q.value = 1;
   filter.frequency.value = 900;
   const body = context.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 500;
-  body.gain.value = 6;
+  body.frequency.value = 400;
+  body.gain.value = 4;
   const low = context.createOscillator();
-  low.type = "sawtooth";
+  low.type = "triangle";
   const high = context.createOscillator();
-  high.type = "square";
-  high.detune.value = 9;
+  high.type = "sine";
+  high.detune.value = 6;
   const highGain = context.createGain();
-  highGain.gain.value = 0.45;
+  highGain.gain.value = 0.35;
 
-  // Forbrændingsslag: amplituden svinger hurtigt, så lyden bliver ru frem for ren.
+  // Let svævning i amplituden, så lyden føles levende uden at være ru.
   const pulse = context.createGain();
-  pulse.gain.value = 0.75;
+  pulse.gain.value = 0.95;
   const lfo = context.createOscillator();
-  lfo.type = "square";
+  lfo.type = "sine";
   const lfoDepth = context.createGain();
-  lfoDepth.gain.value = 0.25;
+  lfoDepth.gain.value = 0.04;
   lfo.connect(lfoDepth);
   lfoDepth.connect(pulse.gain);
 
@@ -121,28 +119,18 @@ export function setEngine(speed: number, boosting: boolean, silence: boolean, dr
   if (!context || !engine) return;
   const now = context.currentTime;
   const ratio = Math.min(1.6, Math.max(0, speed) / 16);
-  // Gokartmotor: høj tomgang (~130 Hz) der skriger op mod ~600 Hz ved fuld fart.
-  const base = 75 + ratio * 190 + (boosting ? 40 : 0);
-  engine.low.frequency.setTargetAtTime(base, now, 0.07);
-  engine.high.frequency.setTargetAtTime(base * 1.5, now, 0.07);
-  engine.lfo.frequency.setTargetAtTime(base / 3, now, 0.07);
-  engine.filter.frequency.setTargetAtTime(700 + ratio * 1300, now, 0.1);
-  engine.rattle.frequency.setTargetAtTime(1200 + ratio * 1200, now, 0.1);
-  engine.rattleGain.gain.setTargetAtTime(0.12 + ratio * 0.25, now, 0.1);
-  engine.gain.gain.setTargetAtTime(silence ? 0 : 0.05 + ratio * 0.04, now, 0.12);
+  // Elmotor: dyb summen (~110 Hz) der stiger til ~500 Hz ved fuld fart.
+  const base = 110 + ratio * 240 + (boosting ? 50 : 0);
+  engine.low.frequency.setTargetAtTime(base, now, 0.09);
+  engine.high.frequency.setTargetAtTime(base * 2, now, 0.09);
+  engine.lfo.frequency.setTargetAtTime(4 + ratio * 4, now, 0.1);
+  engine.filter.frequency.setTargetAtTime(600 + ratio * 1000, now, 0.1);
+  engine.rattle.frequency.setTargetAtTime(1000 + ratio * 800, now, 0.1);
+  engine.rattleGain.gain.setTargetAtTime(0.01 + ratio * 0.04, now, 0.1);
+  engine.gain.gain.setTargetAtTime(silence ? 0 : 0.06 + ratio * 0.04, now, 0.12);
 
   const squealing = !silence && drifting && speed > 6;
   engine.squealGain.gain.setTargetAtTime(squealing ? 0.05 + ratio * 0.05 : 0, now, 0.06);
-
-  // Udstødningsklik: et hurtigt fald i fart ved høj fart svarer til at slippe speederen.
-  if (!silence && lastSpeed / 16 > 0.6 && lastSpeed - speed > 0.25 && now - lastPop > 0.12) {
-    lastPop = now;
-    for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) {
-      noise(i * 0.07 + Math.random() * 0.03, 0.05, 0.35, 700 + Math.random() * 500);
-      tone(180 + Math.random() * 60, i * 0.07, 0.05, "square", 0.08, 70);
-    }
-  }
-  lastSpeed = silence ? 0 : speed;
 }
 
 function tone(frequency: number, start: number, length: number, type: OscillatorType, volume: number, slideTo?: number): void {

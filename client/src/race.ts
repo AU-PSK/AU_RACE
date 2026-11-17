@@ -97,17 +97,17 @@ export const TIME_LIMIT = 240;
 export const MAX_RACERS = 4;
 /** Driftladning, der skal til for blå, orange og lilla mini-turbo. */
 export const DRIFT_LEVELS = [0.6, 1.3, 2.1];
-export const BOT_NAMES = ["Lektor Lynet", "Studie-Stine", "Kaffe-Kim", "Professor Pedal"];
+export const BOT_NAMES = ["Lektor Birdie", "Studie-Stine", "Kaffe-Kim", "Professor Putter"];
 export const BOT_COLORS = ["#ff5252", "#ffb703", "#2f7bff", "#ff7ac8"];
 
 const KART_RADIUS = 1;
-const OFFROAD_SPEED = BASE_SPEED * 0.55;
-const ACCELERATION = 13;
+const OFFROAD_SPEED = BASE_SPEED * 0.65;
+const ACCELERATION = 11;
 const BRAKING = 26;
 const REVERSE_SPEED = 5;
 const COAST_DRAG = 4;
 const OVERSPEED_DRAG = 14;
-const TURN_RATE = 2.3;
+const TURN_RATE = 2.0;
 const STEER_RESPONSE = 9;
 const DRIFT_MIN_SPEED = 8;
 const DRIFT_HOP = 0.28;
