@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#10171b" />
-    <meta name="description" content="Et originalt browserbaseret gokartspil inspireret af Universitetsparken." />
+    <meta name="description" content="Et originalt browserbaseret golfbilspil inspireret af Universitetsparken." />
     <title>AU Race — Universitetsparken</title>
   </head>
   <body>
@@ -12,7 +12,7 @@
       <section id="menu" class="panel">
         <div class="eyebrow">AU RACE · BROWSERPROTOTYPE</div>
         <h1>Universitetsparken<br /><span>Grand Prix</span></h1>
-        <p class="intro">En original gokartbane inspireret af campus. Kør mod computeren, kør alene på tid, eller invitér andre direkte med et link.</p>
+        <p class="intro">En original golfbilsbane inspireret af campus. Kør mod computeren, kør alene på tid, eller invitér andre direkte med et link.</p>
         <form id="join-form">
           <label for="nickname">Kaldenavn</label>
           <input id="nickname" name="nickname" maxlength="20" autocomplete="nickname" placeholder="Dit navn på banen" required />
@@ -21,7 +21,7 @@
             <option value="racer">Racer</option>
             <option value="spectator">Tilskuer</option>
           </select>
-          <label for="institute">Institut (Health) – bestemmer din kartfarve</label>
+          <label for="institute">Institut (Health) – bestemmer din bilfarve</label>
           <select id="institute" name="institute">
             <option value="">Intet valgt</option>
           </select>
@@ -40,13 +40,13 @@
       <section id="lobby" class="panel hidden">
         <div class="eyebrow">PRIVAT LOBBY</div>
         <h2>Venter ved startlinjen</h2>
-        <p>Del lobbylinket. Når dine venner åbner det, kan de vælge navn, kart og rolle og deltage direkte.</p>
+        <p>Del lobbylinket. Når dine venner åbner det, kan de vælge navn, golfbil og rolle og deltage direkte.</p>
         <label for="invite-link">Offentligt invitationslink</label>
         <a id="invite-link" class="invite-link" href=""></a>
         <button id="copy-link" class="secondary" type="button">Kopiér invitationslink</button>
         <h3>Spillere</h3>
         <ul id="players"></ul>
-        <label class="check"><input id="bots-toggle" type="checkbox" checked /> Fyld op med computerkarts</label>
+        <label class="check"><input id="bots-toggle" type="checkbox" checked /> Fyld op med computerbiler</label>
         <button id="start-button" type="button" disabled>Start løb</button>
         <p id="lobby-status" class="fine-print">Du kan starte en tidskørsel alene eller invitere andre til løbet.</p>
         <button id="leave-button" class="text-button" type="button">Forlad rum</button>

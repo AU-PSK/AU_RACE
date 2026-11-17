@@ -1,6 +1,6 @@
 # AU Race
 
-Et uofficielt, originalt browserbaseret 3D-gokartprototype inspireret af ruten gennem
+Et uofficielt, originalt browserbaseret 3D-golfbilsprototype inspireret af ruten gennem
 Universitetsparken. Spillet bruger ikke officielt AU-branding eller kopierer
 andre spils figurer, musik eller banedesign.
 
@@ -49,12 +49,12 @@ Venner åbner linket, vælger kaldenavn og trykker **Deltag i løb**.
 
 ## Sådan spiller du
 
-Skriv et kaldenavn og vælg **Kør mod computeren** for et løb mod tre computerkarts, eller
+Skriv et kaldenavn og vælg **Kør mod computeren** for et løb mod tre computerbiler, eller
 **Tidskørsel alene** for at jagte tiden.
 For multiplayer vælg **Opret peer-to-peer-løb**. Del invitationslinket fra
 lobbyen; hver gæst åbner linket, vælger kaldenavn, racer/tilskuer og institut
 og trykker **Deltag i løb**. Instituttet vises efter navnet (fx "Anna · Biomedicin")
-og bestemmer kartfarven. Værten starter løbet og skal blive online.
+og bestemmer bilfarven. Værten starter løbet og skal blive online.
 
 Kør med **W / ↑**, brems og bak med **S / ↓**, og styr frit med **A / D / ← / →**.
 Hold **Shift** nede, mens du styrer, for at drifte: jo længere drift, jo større
@@ -66,7 +66,7 @@ træer stopper dig. Kører du i søen eller for langt væk, sættes du tilbage p
 banen. Gas lige efter "2" i nedtællingen giver raketstart.
 
 Bonuskasser på banen giver Kaffeboost (fart), Papirbunke (smides bag dig) eller
-Frisbee (affyres frem); jo længere bagude, jo oftere får du fart. Computerkartene
+Frisbee (affyres frem); jo længere bagude, jo oftere får du fart. Computerbilerne
 holder sig tæt på dig, så løbet bliver spændende, og de fylder op til fire racere.
 Tidskørsel er uden bonuskasser, men med tre kaffeboosts.
 
@@ -96,9 +96,9 @@ Datakilden er [Mapterhorn](https://mapterhorn.com), som udstiller DHM/Terræn so
 4. Alternativt: officielle DHM/Terræn-GeoTIFF-fliser fra [Dataforsyningen](https://dataforsyningen.dk/) (kræver egen konto) kan bygges med `npm run terrain -- build data/<flise>.tif ... --vintage "<dataårgang>"`; `bounds` viser, hvilke fliser der skal bruges.
 5. `npm run terrain -- selftest` afprøver værktøjet, og `npm run terrain -- reset` fjerner højdedata igen.
 
-Højderne gengives 3 gange overdrevet (`HEIGHT_EXAGGERATION` i `client/src/terrain.ts`), fordi banens reelle relief på ca. 14 m ellers ikke kan ses, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og karts, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
+Højderne gengives 3 gange overdrevet (`HEIGHT_EXAGGERATION` i `client/src/terrain.ts`), fordi banens reelle relief på ca. 14 m ellers ikke kan ses, og ruten starter i y = 0. Løbsfysik, kollision og multiplayer bruger stadig kun x/z; højden er kun visuel (terrænmesh, vej og kantsten, bygninger, træer, objekter og biler, der følger terrænet og læner med skråningen). Se `TERRAIN_DATA_LICENSE.md` for kreditering og transformation.
 
-Vejen er flad på tværs og følger en udglattet højdeprofil langs midterlinjen (`terrain.ts`). Terrænet graves eller fyldes op til vejen med en blød skråning, så terrænet ikke stikker op gennem vejen, og karts kører på vejfladen. Hvor to strækninger af ruten ligger tæt i forskellig højde, blandes skråningerne. Kameraet løftes, så terrænet ikke ligger mellem kamera og kart (fx over en bakketop).
+Vejen er flad på tværs og følger en udglattet højdeprofil langs midterlinjen (`terrain.ts`). Terrænet graves eller fyldes op til vejen med en blød skråning, så terrænet ikke stikker op gennem vejen, og biler kører på vejfladen. Hvor to strækninger af ruten ligger tæt i forskellig højde, blandes skråningerne. Kameraet løftes, så terrænet ikke ligger mellem kamera og bil (fx over en bakketop).
 
 > Terrændata: Indeholder data fra Danmarks Højdemodel, DHM/Terræn (Klimadatastyrelsen / Styrelsen for Dataforsyning og Infrastruktur), CC BY 4.0, <https://dataforsyningen.dk/>, leveret som åbne højdefliser af Mapterhorn (<https://mapterhorn.com>). Data er omprøvet og omsat til et grovere gitter i spillets koordinater. Kreditering skal stå adskilt fra OpenStreetMap-krediteringen. Private tokens må aldrig lægges i repositoriet eller klientkoden.
 
@@ -112,12 +112,12 @@ Vejen er flad på tværs og følger en udglattet højdeprofil langs midterlinjen
 - WebRTC bruger en offentlig STUN-tjeneste. Der er ingen TURN-relay, så
   direkte forbindelser kan fejle på nogle netværk.
 - Three.js-scene i browseren og værtsstyrede bevægelsesopdateringer.
-- Kartfarven følger det valgte institut (kosmetisk, uden forskel i styring); navnet vises med institut.
+- Bilfarven følger det valgte institut (kosmetisk, uden forskel i styring); navnet vises med institut.
 - Kaldenavne og resultater gemmes kun i rummet; ingen konti eller global
   rekordliste.
 
-Denne tekniske prototype bruger foreløbige kartfarver og en original
+Denne tekniske prototype bruger foreløbige bilfarver og en original
 spilfortolkning af ruten, ikke verificerede kortdata. Tre omgange, nedtælling på
 tre sekunder og Campus-puls er prototypevalg, ikke endeligt fastlagte regler.
-Fakultetsnavne og -karts, brandingstilladelser og endelig balance mangler stadig
+Fakultetsnavne og -biler, brandingstilladelser og endelig balance mangler stadig
 afklaring.
